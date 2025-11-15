@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from app.services import weather_service
 
 app = FastAPI()
 
@@ -8,9 +9,9 @@ def read_root():
 
 @app.post("/suggest-outfit/")
 async def suggest_outfit(location: str):
+    weather_data = await weather_service.get_weather_data(location)
     # This endpoint will eventually:
-    # 1. Get weather for the location.
-    # 2. Get user preferences.
-    # 3. Call the LLM to suggest an outfit.
-    # 4. Return the suggestion.
-    return {"message": f"Outfit suggestion for {location} coming soon!"}
+    # 1. Get user preferences.
+    # 2. Call the LLM to suggest an outfit.
+    # 3. Return the suggestion.
+    return weather_data
