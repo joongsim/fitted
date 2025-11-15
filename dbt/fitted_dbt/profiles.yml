@@ -1,0 +1,11 @@
+fitted_dbt:
+  target: dev
+  outputs:
+    dev:
+      type: databricks
+      catalog: fitted_catalog
+      schema: fitted_wardrobe
+      host: "{{ env_var('DATABRICKS_HOST') }}"
+      http_path: "{{ env_var('DATABRICKS_HTTP_PATH') }}"
+      token: "{{ env_var('DATABRICKS_TOKEN') }}"
+      threads: 4
