@@ -30,7 +30,7 @@ graph TD
 
     subgraph External Services
         E[Weather API]
-        F[LLM Provider]
+        F[LLM Provider: OpenRouter (openai/gpt-4o-mini)]
     end
 
     A -- "User Request" --> B
@@ -47,14 +47,15 @@ graph TD
 
 ## TODO
 
-- [ ] Set up the project structure
-- [ ] Develop the FastAPI application
-- [ ] Integrate with a weather API
-- [ ] Set up the Databricks environment
-- [ ] Develop dbt models
+- [x] Set up the project structure
+- [x] Develop the FastAPI application
+- [x] Integrate with a weather API
+- [x] Set up the Databricks environment
+- [x] Develop dbt models
 - [ ] Create Airflow DAGs
-- [ ] Integrate with a Large Language Model (LLM)
+- [x] Integrate with a Large Language Model (LLM)
 - [ ] Implement user preference storage
+- [ ] Implement NOAA weather API
 
 ## Databricks Configuration
 
