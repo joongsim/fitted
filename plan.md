@@ -31,7 +31,7 @@ graph TD
 
     subgraph External Services
         E[Weather API]
-        F[LLM Provider: OpenRouter (openai/gpt-4o-mini)]
+        F["LLM Provider: OpenRouter (openai/gpt-4o-mini)"]
     end
 
     A -- "User Request" --> B
