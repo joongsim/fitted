@@ -16,6 +16,7 @@ graph TD
         A[FastAPI App]
     end
 
+    
     subgraph Data Ingestion & Orchestration
         B[Airflow]
     end
