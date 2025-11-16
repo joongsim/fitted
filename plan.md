@@ -17,7 +17,7 @@ graph TD
     end
 
     
-    subgraph Data Ingestion & Orchestration
+    subgraph Data Ingestion and Orchestration
         B[Airflow]
     end
 
