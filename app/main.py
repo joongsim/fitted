@@ -1,5 +1,7 @@
+# app/main.py
 from fastapi import FastAPI
 from app.services import weather_service
+from app.services import llm_service # Import the new LLM service
 
 app = FastAPI()
 
@@ -10,8 +12,22 @@ def read_root():
 @app.post("/suggest-outfit/")
 async def suggest_outfit(location: str):
     weather_data = await weather_service.get_weather_data(location)
-    # This endpoint will eventually:
-    # 1. Get user preferences.
-    # 2. Call the LLM to suggest an outfit.
-    # 3. Return the suggestion.
-    return weather_data
+
+    # Extract temperature and condition from weather data
+    temp_c = weather_data["current"]["temp_c"]
+    condition = weather_data["current"]["condition"]["text"]
+
+    # Call the LLM service to get an outfit suggestion
+    outfit_suggestion = await llm_service.get_outfit_suggestion(
+        location=location,
+        temp_c=temp_c,
+        condition=condition
+    )
+
+    # Return both weather data and the outfit suggestion
+    return {
+        "location": location,
+        "weather": weather_data,
+        "outfit_suggestion": outfit_suggestion
+    }
+

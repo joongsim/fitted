@@ -2,3 +2,6 @@ fastapi
 uvicorn[standard]
 httpx
 databricks-cli
+dbt-databricks
+openai
+python-dotenv
