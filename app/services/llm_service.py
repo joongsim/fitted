@@ -1,6 +1,6 @@
 # app/services/llm_service.py
 import os
-from openai import OpenAI
+from openai import AsyncOpenAI
 from dotenv import load_dotenv
 
 load_dotenv() # Load environment variables from .env file
@@ -11,7 +11,7 @@ if not OPENROUTER_API_KEY:
 
 # Initialize the OpenAI client to use OpenRouter
 # The base_url points to OpenRouter's API endpoint
-client = OpenAI(
+client = AsyncOpenAI(
     base_url="https://openrouter.ai/api/v1",
     api_key=OPENROUTER_API_KEY,
 )
