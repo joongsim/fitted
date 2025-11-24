@@ -1,7 +1,13 @@
+# Core API dependencies
 fastapi
-uvicorn[standard]
+mangum  # AWS Lambda adapter for FastAPI
 httpx
+python-dotenv
+openai
+
+# Development dependencies (not needed in Lambda)
+uvicorn[standard]
+
+# Data pipeline dependencies (for Airflow/dbt, not Lambda)
 databricks-cli
 dbt-databricks
-openai
-python-dotenv
