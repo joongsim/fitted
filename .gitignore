@@ -1,3 +1,15 @@
+# AWS Deployment Artifacts
+.aws-sam/
+samconfig.toml
+lambda-package/
+lambda-deployment.zip
+aws-sam-cli-linux-x86_64.zip
+sam-installation/
+aws/
+
+# Private documentation (review before committing)
+docs/private/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.pyc
