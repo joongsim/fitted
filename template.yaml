@@ -1,0 +1,107 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Fitted Wardrobe Assistant - FastAPI on Lambda
+
+Globals:
+  Function:
+    Timeout: 30
+    MemorySize: 512
+    Runtime: python3.13
+    Architectures:
+      - x86_64
+
+Parameters:
+  OpenRouterApiKey:
+    Type: String
+    Description: OpenRouter API Key for LLM service
+    NoEcho: true
+
+Resources:
+  FittedApi:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: makefile
+    Properties:
+      FunctionName: fitted-wardrobe-api
+      CodeUri: .
+      Handler: app.main.handler
+      Description: Fitted Wardrobe Assistant API
+      Role: !GetAtt FittedApiRole.Arn
+      Environment:
+        Variables:
+          OPENROUTER_API_KEY: !Ref OpenRouterApiKey
+      Events:
+        RootPath:
+          Type: HttpApi
+          Properties:
+            Path: /
+            Method: GET
+        SuggestOutfit:
+          Type: HttpApi
+          Properties:
+            Path: /suggest-outfit/
+            Method: POST
+        CatchAll:
+          Type: HttpApi
+          Properties:
+            Path: /{proxy+}
+            Method: ANY
+      Tags:
+        Project: fitted-wardrobe
+        Environment: production
+
+  # S3 Bucket for storing weather data
+  WeatherDataBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub 'fitted-weather-data-${AWS::AccountId}'
+      VersioningConfiguration:
+        Status: Enabled
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - Key: Project
+          Value: fitted-wardrobe
+
+  # Lambda execution role with S3 access
+  FittedApiRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: S3Access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:ListBucket
+                Resource:
+                  - !GetAtt WeatherDataBucket.Arn
+                  - !Sub '${WeatherDataBucket.Arn}/*'
+
+Outputs:
+  ApiUrl:
+    Description: URL of the HTTP API
+    Value: !Sub 'https://${ServerlessHttpApi}.execute-api.${AWS::Region}.amazonaws.com/'
+  
+  FunctionArn:
+    Description: ARN of the Lambda function
+    Value: !GetAtt FittedApi.Arn
+  
+  WeatherBucket:
+    Description: S3 bucket for weather data
+    Value: !Ref WeatherDataBucket
