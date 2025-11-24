@@ -1,9 +1,13 @@
 # app/main.py
 from fastapi import FastAPI
+from mangum import Mangum
 from app.services import weather_service
 from app.services import llm_service # Import the new LLM service
 
 app = FastAPI()
+
+# Lambda handler - this is what AWS Lambda will call
+handler = Mangum(app)
 
 @app.get("/")
 def read_root():

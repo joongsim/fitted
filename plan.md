@@ -52,8 +52,8 @@ graph TD
 - [x] Develop the FastAPI application
 - [x] Integrate with a weather API
 - [x] Set up the Databricks environment
-- [x] Develop dbt models
-- [ ] Create Airflow DAGs
+- [ ] Develop dbt models
+- [x] Create Airflow DAGs
 - [x] Integrate with a Large Language Model (LLM)
 - [ ] Implement user preference storage
 - [ ] Implement NOAA weather API
