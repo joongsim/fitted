@@ -1,0 +1,35 @@
+name: Deploy to AWS Lambda
+
+on:
+  push:
+    branches: [ main ]
+
+permissions:
+  id-token: write # Required for OIDC
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.13'
+          
+      - name: Install SAM CLI
+        uses: aws-actions/setup-sam@v2
+        
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          # Replace with your actual Role ARN
+          role-to-assume: arn:aws:iam::903558039846:role/github_actions
+          aws-region: us-west-1
+          
+      - name: Build and Deploy
+        run: |
+          sam build
+          sam deploy --no-confirm-changeset --no-fail-on-empty-changeset
