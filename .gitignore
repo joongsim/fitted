@@ -128,3 +128,7 @@ dmypy.json
 
 # Personal credentials
 .databricks-token
+
+
+# Personal documentation
+docs/personal/

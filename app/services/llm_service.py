@@ -57,5 +57,5 @@ async def get_outfit_suggestion(location: str, temp_c: float, condition: str) ->
         return suggestion
     except Exception as e:
         print(f"Error calling LLM service: {e}")
-        return "Could not generate an outfit suggestion at this time."
+        return f"Could not generate an outfit suggestion at this time. {e}"
 
