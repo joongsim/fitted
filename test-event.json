@@ -1,5 +1,22 @@
 {
-  "httpMethod": "GET",
-  "path": "/",
-  "headers": {}
+  "version": "2.0",
+  "routeKey": "POST /suggest-outfit/",
+  "rawPath": "/suggest-outfit/",
+  "rawQueryString": "location=London",
+  "headers": {
+    "content-type": "application/json"
+  },
+  "queryStringParameters": {
+    "location": "London"
+  },
+  "requestContext": {
+    "http": {
+      "method": "POST",
+      "path": "/suggest-outfit/",
+      "protocol": "HTTP/1.1",
+      "sourceIp": "127.0.0.1",
+      "userAgent": "PostmanRuntime/7.26.8"
+    }
+  },
+  "body": ""
 }

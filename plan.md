@@ -57,17 +57,25 @@ graph TD
 **Cost:** $0/month (within free tier)
 **URL:** https://e2d6c3y53g.execute-api.us-west-1.amazonaws.com/
 
-### 🔄 Week 2: Real Weather Data Integration (NEXT)
-- [ ] Sign up for Weather API service
-- [ ] Implement real weather API integration
-- [ ] Store weather data in S3
-- [ ] Create data lake structure (Bronze/Silver/Gold)
-- [ ] Update Lambda to use real weather data
-- [ ] Add data validation and error handling
-- [ ] Implement caching strategy
+### 🔄 Week 2: Real Weather Data Integration (IN PROGRESS)
+- [x] Sign up for Weather API service
+- [x] Implement real weather API integration
+- [x] Store weather data in S3
+- [x] Create data lake structure (Bronze/Silver/Gold)
+- [x] Update Lambda to use real weather data
+- [ ] Add data validation and error handling (Pydantic models)
+- [ ] Implement caching strategy (S3 fallback)
 - [ ] Create basic analytics queries
 
-### 📅 Week 3: Airflow Orchestration
+### 📅 Week 3: Enhanced Features & Validation
+- [ ] Create Pydantic models for weather data validation
+- [ ] Update `weather_service.py` to fetch forecast data
+- [ ] Implement missing API endpoints (`/weather/{location}`, `/forecast`, `/history`)
+- [ ] Enhance `llm_service.py` to include forecast context
+- [ ] Improve caching strategy (S3 fallback)
+- [ ] Update documentation
+
+### 📅 Week 4: Airflow Orchestration
 - [ ] Launch EC2 t3.micro instance
 - [ ] Install and configure Airflow
 - [ ] Create weather data ingestion DAG
@@ -76,7 +84,7 @@ graph TD
 - [ ] Set up monitoring and alerting
 - [ ] Document Airflow workflows
 
-### 📅 Week 4: dbt Transformations & Databricks
+### 📅 Week 5: dbt Transformations & Databricks
 - [ ] Set up Databricks Community Edition
 - [ ] Configure dbt for Databricks
 - [ ] Create Delta Lake tables (Bronze/Silver/Gold)
@@ -97,16 +105,84 @@ graph TD
 
 ---
 
-## Week 2 Detailed Plan: Real Weather Data Integration
+## Week 3 Detailed Plan: Enhanced Features & Validation
 
-### Milestone: Production-Ready Weather Data Pipeline
+### Milestone: Robust API & Enhanced Suggestions
 
-**Timeline:** 1-2 weeks
-**Goal:** Replace mock weather data with real API, store in S3, create analytics foundation
+**Timeline:** 1 week
+**Goal:** Add data validation, forecast capabilities, and improve outfit suggestions.
 
 ---
 
-### Phase 1: Weather API Setup (Days 1-2)
+### Phase 1: Data Validation (Day 1)
+
+#### Task 1.1: Create Pydantic Models
+**File:** `app/models/weather.py`
+
+**Implementation:**
+```python
+from pydantic import BaseModel
+
+class WeatherCondition(BaseModel):
+    text: str
+    icon: str
+    code: int
+
+class CurrentWeather(BaseModel):
+    temp_c: float
+    condition: WeatherCondition
+    wind_kph: float
+    humidity: int
+
+class WeatherResponse(BaseModel):
+    location: dict
+    current: CurrentWeather
+```
+
+**Action Items:**
+1. Create `app/models` directory
+2. Define models for current weather and forecast
+3. Update services to use these models
+
+### Phase 2: Forecast Integration (Days 2-3)
+
+#### Task 2.1: Update Weather Service
+**File:** `app/services/weather_service.py`
+
+**Changes:**
+- Update `get_weather_data` to accept a `days` parameter
+- Fetch forecast data from WeatherAPI
+- Store forecast data in S3
+
+#### Task 2.2: Enhance LLM Service
+**File:** `app/services/llm_service.py`
+
+**Changes:**
+- Update prompt to include forecast data
+- Consider temperature changes and precipitation probability
+
+### Phase 3: API Expansion (Days 4-5)
+
+#### Task 3.1: Implement New Endpoints
+**File:** `app/main.py`
+
+**New Endpoints:**
+- `GET /weather/{location}`: Returns current weather
+- `GET /weather/{location}/forecast`: Returns forecast
+- `GET /weather/history/{location}`: Returns historical data (from S3)
+
+### Phase 4: Caching & Documentation (Day 6)
+
+#### Task 4.1: S3 Fallback Caching
+- Implement logic to check S3 for recent data if API fails or for caching purposes.
+
+#### Task 4.2: Documentation
+- Update API documentation (Swagger/OpenAPI)
+- Update README.md
+
+---
+
+## Week 2 Detailed Plan: Real Weather Data Integration (Completed)
 
 #### Task 1.1: Select and Configure Weather API
 **Options to evaluate:**
