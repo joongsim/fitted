@@ -2,6 +2,7 @@ import httpx
 import os
 import time
 from fastapi import HTTPException
+
 from app.services.storage_service import store_raw_weather_data
 
 
@@ -23,6 +24,11 @@ def get_api_key():
 # In AWS Lambda, this will be in the function configuration.
 WEATHER_API_KEY = os.environ.get("WEATHER_API_KEY")
 BASE_URL = "https://api.weatherapi.com/v1"
+
+
+# Simple in-memory cache to avoid redundant API calls
+_weather_cache = {}
+CACHE_TTL = 900  # seconds
 
 async def _get_mock_data(location: str):
     """
@@ -68,6 +74,16 @@ async def get_weather_data(location: str):
     """
     Fetches real weather data.
     """
+    
+    # CHECK CACHE FIRST
+    if location in _weather_cache:
+        data, timestamp = _weather_cache[location]
+        if time.time() - timestamp < CACHE_TTL:
+            print("Returning cached weather data.")
+            return data
+        else:
+            del _weather_cache[location]  # Cache expired
+    
     # Check if we have a key. If not, use mock data (great for testing without using quota).
     if not WEATHER_API_KEY:
         print("⚠️ No API key found. Using mock data.")
@@ -96,6 +112,8 @@ async def get_weather_data(location: str):
             # make this a background task so the user doesn't wait for S3.
             await store_raw_weather_data(location, data)
             
+            # CACHE THE RESULT
+            _weather_cache[location] = (data, time.time())
             return data
             
         except httpx.HTTPStatusError as e:
