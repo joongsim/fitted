@@ -1,0 +1,8 @@
+{
+  "resource": "/",
+  "path": "/suggest-outfit/",
+  "httpMethod": "POST",
+  "queryStringParameters": {
+    "location": "London"
+  }
+}
