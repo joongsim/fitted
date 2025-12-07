@@ -38,4 +38,7 @@ jobs:
             --capabilities CAPABILITY_IAM \
             --no-confirm-changeset \
             --no-fail-on-empty-changeset \
-            --resolve-s3
+            --resolve-s3 \
+            --parameter-overrides \
+              OpenRouterApiKey="${{ secrets.OPENROUTER_API_KEY }}" \
+              WeatherApiKey="${{ secrets.WEATHER_API_KEY }}"
