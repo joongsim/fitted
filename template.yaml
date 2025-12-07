@@ -15,6 +15,10 @@ Parameters:
     Type: String
     Description: OpenRouter API Key for LLM service
     NoEcho: true
+  WeatherApiKey:
+    Type: String
+    Description: WeatherAPI.com API Key
+    NoEcho: true
 
 Resources:
   FittedApi:
@@ -30,6 +34,7 @@ Resources:
       Environment:
         Variables:
           OPENROUTER_API_KEY: !Ref OpenRouterApiKey
+          WEATHER_API_KEY: !Ref WeatherApiKey
           WEATHER_BUCKET_NAME: !Ref WeatherDataBucket
       Events:
         RootPath:
