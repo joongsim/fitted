@@ -30,6 +30,7 @@ Resources:
       Environment:
         Variables:
           OPENROUTER_API_KEY: !Ref OpenRouterApiKey
+          WEATHER_BUCKET_NAME: !Ref WeatherDataBucket
       Events:
         RootPath:
           Type: HttpApi
