@@ -4,6 +4,13 @@ import httpx
 from unittest.mock import patch, AsyncMock, MagicMock
 from fastapi import HTTPException
 from app.services import weather_service
+from app.models.weather import (
+    WeatherResponse,
+    CurrentWeather,
+    Location,
+    WeatherCondition,
+)
+from pydantic import ValidationError
 
 # Mock data for tests
 MOCK_WEATHER_RESPONSE = {
@@ -112,7 +119,7 @@ async def test_get_weather_data_network_error():
     """Test handling of network errors"""
     # Clear cache to ensure we hit the network
     weather_service._weather_cache.clear()
-    
+
     with patch("app.services.weather_service.WEATHER_API_KEY", "fake-key"):
         with patch("httpx.AsyncClient") as mock_client:
             mock_client_instance = AsyncMock()
@@ -123,3 +130,56 @@ async def test_get_weather_data_network_error():
                 await weather_service.get_weather_data("London")
 
             assert exc.value.status_code == 503
+
+
+def test_valid_weather_response():
+    """Test that the valid data is correctly parsed."""
+    weather = WeatherResponse(**MOCK_WEATHER_RESPONSE)
+    assert weather.location.name == "Tokyo"
+    assert weather.current.temp_c == 5.2
+    assert weather.current.condition.text == "Clear"
+
+
+def test_invalid_temperature():
+    """Test that invalid temperature raises a validation error."""
+    # Create a deep copy of the mock data and modify it to have an invalid temperature
+    # Needs to be a deep copy to avoid mutating the original mock data
+    invalid_data = MOCK_WEATHER_RESPONSE.copy()
+    invalid_data["current"] = invalid_data["current"].copy()
+    invalid_data["current"]["temp_c"] = 1000.0  # Unrealistic temperature
+
+    with pytest.raises(ValidationError) as exc_info:
+        WeatherResponse(**invalid_data)
+        
+    # Verify the error message points to the temperature field
+    assert "temp_c" in str(exc_info.value)
+    assert "less than or equal to 60" in str(exc_info.value)
+
+def test_invalid_humidity():
+    """Test that invalid humidity raises a validation error."""
+    # Create a deep copy of the mock data and modify it to have an invalid humidity
+    # Needs to be a deep copy to avoid mutating the original mock data
+    invalid_data = MOCK_WEATHER_RESPONSE.copy()
+    invalid_data["current"] = invalid_data["current"].copy()
+    invalid_data["current"]["humidity"] = 1000.0  # Unrealistic humidity
+
+    with pytest.raises(ValidationError) as exc_info:
+        WeatherResponse(**invalid_data)
+        
+    # Verify the error message points to the humidity field
+    assert "humidity" in str(exc_info.value)
+    assert "less than or equal to 100" in str(exc_info.value)
+
+def test_missing_required_field():
+    """Test that missing required fields raise a validation error."""
+    # Create a deep copy of the mock data and remove a required field
+    invalid_data = MOCK_WEATHER_RESPONSE.copy()
+    invalid_data["location"] = invalid_data["location"].copy()
+    del invalid_data["location"]["name"]  # Remove required field
+
+    with pytest.raises(ValidationError) as exc_info:
+        WeatherResponse(**invalid_data)
+        
+    # Verify the error message points to the missing field
+    assert "location" in str(exc_info.value)
+    assert "Field required" in str(exc_info.value)
