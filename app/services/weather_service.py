@@ -1,6 +1,9 @@
 import httpx
 import os
 import time
+import boto3
+import json
+from datetime import datetime, timedelta, timezone
 from fastapi import HTTPException
 
 from app.services.storage_service import store_raw_weather_data
@@ -37,20 +40,10 @@ async def _get_mock_data(location: str):
     """
     Fetches weather data for a given location.
 
-    This is a placeholder function. In a real application, you would
-    integrate with a weather API provider like OpenWeatherMap or WeatherAPI.com.
-    You would need to handle API keys, error responses, and the structure
-    of the weather data.
+    This is a placeholder function that simulates fetching weather data
+    for testing purposes. In a real application, this would call an external
+    weather API.
     """
-    # For demonstration purposes, we'll return mock data.
-    # In a real implementation, you would make an API call like this:
-    #
-    # weather_api_url = f"https://api.weatherapi.com/v1/current.json?key=YOUR_API_KEY&q={location}"
-    # async with httpx.AsyncClient() as client:
-    #     response = await client.get(weather_api_url)
-    #     if response.status_code != 200:
-    #         raise HTTPException(status_code=404, detail="Weather data not found for this location.")
-    #     return response.json()
 
     print(f"Fetching weather for {location}...")
     return {
@@ -91,7 +84,7 @@ async def get_weather_data(location: str):
     Fetches real weather data.
     """
 
-    # CHECK CACHE FIRST
+    # CHECK MEMORY CACHE FIRST
     if location in _weather_cache:
         data, timestamp = _weather_cache[location]
         if time.time() - timestamp < CACHE_TTL:
@@ -99,7 +92,43 @@ async def get_weather_data(location: str):
             return data
         else:
             del _weather_cache[location]  # Cache expired
+    # END MEMORY CACHE CHECK
+    # Check S3 for cached data
+    s3 = boto3.client("s3")
+    bucket_name = os.environ.get("WEATHER_BUCKET_NAME")
 
+    # Calculate prefix for today to narrow search
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    # Sanitize location to match storage format
+    safe_location = "".join(
+        c for c in location if c.isalnum() or c in ("-", "_")
+    ).lower()
+    prefix = f"raw/weather/dt={today}/location={safe_location}/"
+
+    try:
+        # List objects in the bucket with the prefix
+        response = s3.list_objects_v2(
+            Bucket=bucket_name,
+            Prefix=prefix,
+        )
+        if "Contents" in response:
+            # Sort by LastModified to get the most recent file
+            latest_file = sorted(response['Contents'], key=lambda x: x['LastModified'], reverse=True)[0]
+            # Check if it's recent enough 
+            age = datetime.now(timezone.utc) - latest_file['LastModified']
+            if age < timedelta(seconds=CACHE_TTL):
+                print(f"Cache hit (S3) Found data from {age.seconds}s ago")
+                # Get the object
+                obj = s3.get_object(Bucket=bucket_name, Key=latest_file['Key'])
+                data = json.loads(obj['Body'].read())
+                
+                # Update in-memory cache
+                _weather_cache[location] = (data, time.time())
+                return data
+    except Exception as e:
+        print(f"Cache miss (S3) or error: {e}")
+        
     # Check if we have a key. If not, use mock data (great for testing without using quota).
     if not WEATHER_API_KEY:
         print("⚠️ No API key found. Using mock data.")
