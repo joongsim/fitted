@@ -4,12 +4,47 @@ import httpx
 from unittest.mock import patch, AsyncMock, MagicMock
 from fastapi import HTTPException
 from app.services import weather_service
+from app.models.weather import (
+    WeatherResponse,
+    CurrentWeather,
+    Location,
+    WeatherCondition,
+)
+from pydantic import ValidationError
 
 # Mock data for tests
 MOCK_WEATHER_RESPONSE = {
-    "location": {"name": "London"},
-    "current": {"temp_c": 15.0, "condition": {"text": "Sunny"}}
+    "location": {
+        "name": "Tokyo",
+        "region": "Tokyo",
+        "country": "Japan",
+        "lat": 35.6895,
+        "lon": 139.6917,
+        "tz_id": "Asia/Tokyo",
+        "localtime_epoch": 1765056792,
+        "localtime": "2025-12-07 06:33",
+    },
+    "current": {
+        "last_updated_epoch": 1765056600,
+        "last_updated": "2025-12-07 06:30",
+        "temp_c": 5.2,
+        "temp_f": 41.4,
+        "is_day": 0,
+        "condition": {
+            "text": "Clear",
+            "icon": "//cdn.weatherapi.com/weather/64x64/night/113.png",
+            "code": 1000,
+        },
+        "wind_mph": 4.7,
+        "wind_kph": 7.6,
+        "humidity": 75,
+        "cloud": 0,
+        "feelslike_c": 3.5,
+        "feelslike_f": 38.3,
+        "uv": 0.0,
+    },
 }
+
 
 @pytest.mark.asyncio
 async def test_get_weather_data_no_api_key():
@@ -17,72 +52,134 @@ async def test_get_weather_data_no_api_key():
     with patch.dict(os.environ, {}, clear=True):
         # Reload module to pick up empty env
         # Note: In a real scenario, we might need to reload the module or patch the variable directly
-        with patch('app.services.weather_service.WEATHER_API_KEY', None):
-            data = await weather_service.get_weather_data("London")
-            assert data["location"]["name"] == "London"
-            assert data["current"]["temp_c"] == 14.0  # Mock data value
+        with patch("app.services.weather_service.WEATHER_API_KEY", None):
+            data = await weather_service.get_weather_data("Tokyo")
+            assert data["location"]["name"] == "Tokyo"
+            assert data["current"]["temp_c"] == 5.2  # Mock data value
+
 
 @pytest.mark.asyncio
 async def test_get_weather_data_success():
     """Test successful API call and S3 storage"""
-    with patch('app.services.weather_service.WEATHER_API_KEY', 'fake-key'):
-        with patch('httpx.AsyncClient') as mock_client:
+    with patch("app.services.weather_service.WEATHER_API_KEY", "fake-key"):
+        with patch("httpx.AsyncClient") as mock_client:
             # Setup mock response
             mock_response = MagicMock()
             mock_response.status_code = 200
             mock_response.json.return_value = MOCK_WEATHER_RESPONSE
-            
+
             # Setup async context manager for client
             mock_client_instance = AsyncMock()
             mock_client_instance.get.return_value = mock_response
             mock_client.return_value.__aenter__.return_value = mock_client_instance
-            
+
             # Mock storage service
-            with patch('app.services.weather_service.store_raw_weather_data', new_callable=AsyncMock) as mock_store:
+            with patch(
+                "app.services.weather_service.store_raw_weather_data",
+                new_callable=AsyncMock,
+            ) as mock_store:
                 data = await weather_service.get_weather_data("London")
-                
+
                 # Verify response
                 assert data == MOCK_WEATHER_RESPONSE
-                
+
                 # Verify API was called correctly
                 mock_client_instance.get.assert_called_once()
                 call_args = mock_client_instance.get.call_args
-                assert "London" in call_args[1]['params']['q']
-                
+                assert "London" in call_args[1]["params"]["q"]
+
                 # Verify storage was called
                 mock_store.assert_called_once_with("London", MOCK_WEATHER_RESPONSE)
+
 
 @pytest.mark.asyncio
 async def test_get_weather_data_api_error():
     """Test handling of API errors"""
-    with patch('app.services.weather_service.WEATHER_API_KEY', 'fake-key'):
-        with patch('httpx.AsyncClient') as mock_client:
+    with patch("app.services.weather_service.WEATHER_API_KEY", "fake-key"):
+        with patch("httpx.AsyncClient") as mock_client:
             # Setup mock error response
             mock_response = MagicMock()
             mock_response.status_code = 404
             mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
                 "Not Found", request=MagicMock(), response=mock_response
             )
-            
+
             mock_client_instance = AsyncMock()
             mock_client_instance.get.return_value = mock_response
             mock_client.return_value.__aenter__.return_value = mock_client_instance
-            
+
             with pytest.raises(HTTPException) as exc:
                 await weather_service.get_weather_data("InvalidCity")
-            
+
             assert exc.value.status_code == 404
+
 
 @pytest.mark.asyncio
 async def test_get_weather_data_network_error():
     """Test handling of network errors"""
-    with patch('app.services.weather_service.WEATHER_API_KEY', 'fake-key'):
-        with patch('httpx.AsyncClient') as mock_client:
+    # Clear cache to ensure we hit the network
+    weather_service._weather_cache.clear()
+
+    with patch("app.services.weather_service.WEATHER_API_KEY", "fake-key"):
+        with patch("httpx.AsyncClient") as mock_client:
             mock_client_instance = AsyncMock()
             mock_client_instance.get.side_effect = Exception("Network Error")
             mock_client.return_value.__aenter__.return_value = mock_client_instance
-            
+
             with pytest.raises(HTTPException) as exc:
                 await weather_service.get_weather_data("London")
-            
+
             assert exc.value.status_code == 503
+
+
+def test_valid_weather_response():
+    """Test that the valid data is correctly parsed."""
+    weather = WeatherResponse(**MOCK_WEATHER_RESPONSE)
+    assert weather.location.name == "Tokyo"
+    assert weather.current.temp_c == 5.2
+    assert weather.current.condition.text == "Clear"
+
+
+def test_invalid_temperature():
+    """Test that invalid temperature raises a validation error."""
+    # Create a deep copy of the mock data and modify it to have an invalid temperature
+    # Needs to be a deep copy to avoid mutating the original mock data
+    invalid_data = MOCK_WEATHER_RESPONSE.copy()
+    invalid_data["current"] = invalid_data["current"].copy()
+    invalid_data["current"]["temp_c"] = 1000.0  # Unrealistic temperature
+
+    with pytest.raises(ValidationError) as exc_info:
+        WeatherResponse(**invalid_data)
+        
+    # Verify the error message points to the temperature field
+    assert "temp_c" in str(exc_info.value)
+    assert "less than or equal to 60" in str(exc_info.value)
+
+def test_invalid_humidity():
+    """Test that invalid humidity raises a validation error."""
+    # Create a deep copy of the mock data and modify it to have an invalid humidity
+    # Needs to be a deep copy to avoid mutating the original mock data
+    invalid_data = MOCK_WEATHER_RESPONSE.copy()
+    invalid_data["current"] = invalid_data["current"].copy()
+    invalid_data["current"]["humidity"] = 1000.0  # Unrealistic humidity
+
+    with pytest.raises(ValidationError) as exc_info:
+        WeatherResponse(**invalid_data)
+        
+    # Verify the error message points to the humidity field
+    assert "humidity" in str(exc_info.value)
+    assert "less than or equal to 100" in str(exc_info.value)
+
+def test_missing_required_field():
+    """Test that missing required fields raise a validation error."""
+    # Create a deep copy of the mock data and remove a required field
+    invalid_data = MOCK_WEATHER_RESPONSE.copy()
+    invalid_data["location"] = invalid_data["location"].copy()
+    del invalid_data["location"]["name"]  # Remove required field
+
+    with pytest.raises(ValidationError) as exc_info:
+        WeatherResponse(**invalid_data)
+        
+    # Verify the error message points to the missing field
+    assert "location" in str(exc_info.value)
+    assert "Field required" in str(exc_info.value)
