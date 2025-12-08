@@ -3,6 +3,7 @@ from fastapi import FastAPI
 from mangum import Mangum
 from app.services import weather_service
 from app.services import llm_service # Import the new LLM service
+from scripts.analyze_weather import query_weather_file
 
 app = FastAPI()
 
@@ -35,3 +36,7 @@ async def suggest_outfit(location: str):
         "outfit_suggestion": outfit_suggestion
     }
 
+@app.post("/analyze-weather/")
+async def analyze_weather(bucket: str, key: str):
+    query_weather_file(bucket, key)
+    return {"message": "Weather analysis completed."}
