@@ -1,27 +1,30 @@
 import boto3
+import json
 
 
 def query_weather_file(bucket, key):
-    s3 = boto3.client("s3")
-
-    # SQL query to extract specific fields
-    query = """
-        SELECT s.location, s.temperature_c, s.condition_text
-        FROM S3Object s
-        WHERE s.current.temp_c > 15
-        """
+    s3 = boto3.client("s3", region_name="us-west-1")
 
     print(f"Querying {key}...")
 
-    response = s3.select_object_content(
-        Bucket=bucket,
-        Key=key,
-        ExpressionType="SQL",
-        Expression=query,
-        InputSerialization={"JSON": {"Type": "DOCUMENT"}},
-        OutputSerialization={"JSON": {"RecordDelimiter": "\n"}},
-    )
-
-    for event in response["Payload"]:
-        if "Records" in event:
-            print(f"Match Found: {event['Records']['Payload'].decode('utf-8')}")
+    try:
+        # Fallback to GetObject since S3 Select is giving MethodNotAllowed
+        response = s3.get_object(Bucket=bucket, Key=key)
+        content = response['Body'].read().decode('utf-8')
+        data = json.loads(content)
+        
+        # Client-side filtering (equivalent to the SQL query)
+        # WHERE s.current.temp_c > 15
+        if data.get('current', {}).get('temp_c', 0) > 15:
+            result = {
+                "location": data.get('location'),
+                "temperature_c": data.get('current', {}).get('temp_c'),
+                "condition_text": data.get('current', {}).get('condition', {}).get('text')
+            }
+            print(f"Match Found: {json.dumps(result)}")
+        else:
+            print(f"No match found (Temperature {data.get('current', {}).get('temp_c')} <= 15)")
+            
+    except Exception as e:
+        print(f"Error querying file: {e}")
+        raise e
