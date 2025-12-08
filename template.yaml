@@ -10,12 +10,6 @@ Globals:
     Architectures:
       - x86_64
 
-Parameters:
-  OpenRouterApiKey:
-    Type: String
-    Description: OpenRouter API Key for LLM service
-    NoEcho: true
-
 Resources:
   FittedApi:
     Type: AWS::Serverless::Function
@@ -29,7 +23,6 @@ Resources:
       Role: !GetAtt FittedApiRole.Arn
       Environment:
         Variables:
-          OPENROUTER_API_KEY: !Ref OpenRouterApiKey
           WEATHER_BUCKET_NAME: !Ref WeatherDataBucket
       Events:
         RootPath:
@@ -93,6 +86,16 @@ Resources:
                 Resource:
                   - !GetAtt WeatherDataBucket.Arn
                   - !Sub '${WeatherDataBucket.Arn}/*'
+        - PolicyName: SSMAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                  - ssm:GetParameters
+                Resource:
+                  - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/fitted/*'
 
 Outputs:
   ApiUrl:

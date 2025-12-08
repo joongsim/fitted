@@ -8,26 +8,8 @@ from fastapi import HTTPException
 
 from app.services.storage_service import store_raw_weather_data
 from app.models.weather import WeatherResponse
+from app.core.config import config
 
-# Try to load .env file for local development (optional - won't exist in Lambda)
-try:
-    from dotenv import load_dotenv
-
-    load_dotenv()
-except ImportError:
-    # dotenv not installed (Lambda environment)
-    pass
-
-
-def get_api_key():
-    """Get API key from environment variables."""
-    return os.environ.get("WEATHER_API_KEY")
-
-
-# Get the key from the environment.
-# In local dev, you might set this in your terminal or a .env file.
-# In AWS Lambda, this will be in the function configuration.
-WEATHER_API_KEY = os.environ.get("WEATHER_API_KEY")
 BASE_URL = "https://api.weatherapi.com/v1"
 
 
@@ -130,8 +112,10 @@ async def get_weather_data(location: str):
         print(f"Cache miss (S3) or error: {e}")
         
     # Check if we have a key. If not, use mock data (great for testing without using quota).
-    if not WEATHER_API_KEY:
-        print("⚠️ No API key found. Using mock data.")
+    try:
+        weather_api_key = config.weather_api_key
+    except Exception as e:
+        print(f"⚠️ No API key found: {e}. Using mock data.")
         return await _get_mock_data(location)
 
     # Use AsyncClient for non-blocking calls
@@ -141,7 +125,7 @@ async def get_weather_data(location: str):
             response = await client.get(
                 f"{BASE_URL}/current.json",
                 params={
-                    "key": WEATHER_API_KEY,
+                    "key": weather_api_key,
                     "q": location,
                     "aqi": "no",  # We don't need air quality index yet
                 },
