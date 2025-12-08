@@ -132,7 +132,6 @@ Resources:
   GlueCrawlerRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: FittedGlueCrawlerRole
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:

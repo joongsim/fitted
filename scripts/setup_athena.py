@@ -165,12 +165,42 @@ def setup_glue_crawler():
     crawler_name = 'fitted-weather-crawler'
     database_name = 'fitted_weather_db'
     
-    # Get AWS account ID for IAM role ARN
+    # Get AWS account ID and region for IAM role ARN
     sts = boto3.client('sts')
     account_id = sts.get_caller_identity()['Account']
     
-    # Role should be created via CloudFormation
-    role_arn = f"arn:aws:iam::{account_id}:role/FittedGlueCrawlerRole"
+    # Try to find the Glue Crawler role created by CloudFormation
+    iam = boto3.client('iam')
+    cloudformation = boto3.client('cloudformation')
+    
+    # Get stack name from environment or use default
+    stack_name = os.environ.get('STACK_NAME', 'fitted-wardrobe-dev')
+    
+    try:
+        # Get role ARN from CloudFormation stack outputs
+        response = cloudformation.describe_stacks(StackName=stack_name)
+        outputs = response['Stacks'][0]['Outputs']
+        role_arn = None
+        for output in outputs:
+            if output['OutputKey'] == 'GlueCrawlerRoleArn':
+                role_arn = output['OutputValue']
+                break
+        
+        if not role_arn:
+            # Fallback: try to find role by prefix
+            roles = iam.list_roles()
+            for role in roles['Roles']:
+                if 'GlueCrawlerRole' in role['RoleName']:
+                    role_arn = role['Arn']
+                    break
+        
+        if not role_arn:
+            print("⚠️  Could not find Glue Crawler role. Using default.")
+            role_arn = f"arn:aws:iam::{account_id}:role/FittedGlueCrawlerRole-{stack_name}"
+            
+    except Exception as e:
+        print(f"⚠️  Error finding role: {e}")
+        role_arn = f"arn:aws:iam::{account_id}:role/FittedGlueCrawlerRole-{stack_name}"
     
     crawler_config = {
         'Name': crawler_name,
