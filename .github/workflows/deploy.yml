@@ -40,6 +40,27 @@ jobs:
           
           echo "Deploying to stack: $STACK_NAME"
           
+          # Check if stack exists and is in ROLLBACK_COMPLETE state
+          STACK_STATUS=$(aws cloudformation describe-stacks \
+            --stack-name $STACK_NAME \
+            --region us-west-1 \
+            --query 'Stacks[0].StackStatus' \
+            --output text 2>/dev/null || echo "DOES_NOT_EXIST")
+          
+          if [[ "$STACK_STATUS" == "ROLLBACK_COMPLETE" ]]; then
+            echo "Stack is in ROLLBACK_COMPLETE state. Deleting before redeployment..."
+            aws cloudformation delete-stack \
+              --stack-name $STACK_NAME \
+              --region us-west-1
+            
+            echo "Waiting for stack deletion to complete..."
+            aws cloudformation wait stack-delete-complete \
+              --stack-name $STACK_NAME \
+              --region us-west-1
+            
+            echo "Stack deleted successfully."
+          fi
+          
           sam build
           sam deploy \
             --stack-name $STACK_NAME \
@@ -47,5 +68,4 @@ jobs:
             --capabilities CAPABILITY_IAM \
             --no-confirm-changeset \
             --no-fail-on-empty-changeset \
-            --resolve-s3 \
-            --tags Project=fitted-wardrobe Environment=${{ github.ref_name }}
+            --resolve-s3

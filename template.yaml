@@ -40,9 +40,6 @@ Resources:
           Properties:
             Path: /{proxy+}
             Method: ANY
-      Tags:
-        Project: fitted-wardrobe
-        Environment: production
 
   # S3 Bucket for storing weather data
   WeatherDataBucket:
