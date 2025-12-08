@@ -8,10 +8,21 @@
     "location": "London"
   },
   "requestContext": {
+    "accountId": "903558039846",
+    "apiId": "test-api",
+    "domainName": "test.execute-api.us-west-1.amazonaws.com",
+    "domainPrefix": "test",
+    "requestId": "test-request-id",
+    "routeKey": "POST /suggest-outfit",
+    "stage": "$default",
+    "time": "01/Jan/2024:00:00:00 +0000",
+    "timeEpoch": 1704067200000,
     "http": {
       "method": "POST",
       "path": "/suggest-outfit",
-      "protocol": "HTTP/1.1"
+      "protocol": "HTTP/1.1",
+      "sourceIp": "127.0.0.1",
+      "userAgent": "test-agent"
     }
   },
   "body": "",
