@@ -1,23 +1,13 @@
 # app/services/llm_service.py
-import os
 from openai import AsyncOpenAI
-
-# Try to load .env file for local development (optional - won't exist in Lambda)
-try:
-    from dotenv import load_dotenv
-    load_dotenv()
-except ImportError:
-    # dotenv not installed (Lambda environment)
-    pass
-
-def get_api_key():
-    """Get API key from environment variables."""
-    return os.environ.get("OPENROUTER_API_KEY")
+from app.core.config import config
 
 def get_client():
     """Get or create OpenRouter client."""
-    api_key = get_api_key()
-    if not api_key:
+    try:
+        api_key = config.openrouter_api_key
+    except Exception as e:
+        print(f"Warning: Could not get OpenRouter API key: {e}")
         return None
     
     return AsyncOpenAI(
