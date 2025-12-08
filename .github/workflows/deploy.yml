@@ -2,7 +2,7 @@ name: Deploy to AWS Lambda
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, dev ]
 
 permissions:
   id-token: write # Required for OIDC
@@ -31,11 +31,21 @@ jobs:
           
       - name: Build and Deploy
         run: |
+          # Determine stack name based on branch
+          if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+            STACK_NAME="fitted-wardrobe-prod"
+          else
+            STACK_NAME="fitted-wardrobe-dev"
+          fi
+          
+          echo "Deploying to stack: $STACK_NAME"
+          
           sam build
           sam deploy \
-            --stack-name fitted-wardrobe \
+            --stack-name $STACK_NAME \
             --region us-west-1 \
             --capabilities CAPABILITY_IAM \
             --no-confirm-changeset \
             --no-fail-on-empty-changeset \
-            --resolve-s3
+            --resolve-s3 \
+            --tags Project=fitted-wardrobe Environment=${{ github.ref_name }}
