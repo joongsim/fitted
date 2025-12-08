@@ -7,7 +7,7 @@ from mangum import Mangum
 from app.services import weather_service
 from app.services import llm_service # Import the new LLM service
 from app.core.config import config
-from scripts.analyze_weather import query_weather_file
+from app.services.analysis_service import query_weather_file
 
 app = FastAPI()
 
