@@ -93,6 +93,67 @@ Resources:
                   - ssm:GetParameters
                 Resource:
                   - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/fitted/*'
+        - PolicyName: AthenaAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - athena:StartQueryExecution
+                  - athena:GetQueryExecution
+                  - athena:GetQueryResults
+                  - athena:StopQueryExecution
+                  - athena:GetWorkGroup
+                Resource:
+                  - !Sub 'arn:aws:athena:${AWS::Region}:${AWS::AccountId}:workgroup/primary'
+              - Effect: Allow
+                Action:
+                  - glue:GetDatabase
+                  - glue:GetTable
+                  - glue:GetPartitions
+                Resource:
+                  - !Sub 'arn:aws:glue:${AWS::Region}:${AWS::AccountId}:catalog'
+                  - !Sub 'arn:aws:glue:${AWS::Region}:${AWS::AccountId}:database/fitted_weather_db'
+                  - !Sub 'arn:aws:glue:${AWS::Region}:${AWS::AccountId}:table/fitted_weather_db/*'
+              - Effect: Allow
+                Action:
+                  - s3:GetBucketLocation
+                  - s3:GetObject
+                  - s3:ListBucket
+                  - s3:ListBucketMultipartUploads
+                  - s3:ListMultipartUploadParts
+                  - s3:AbortMultipartUpload
+                  - s3:PutObject
+                Resource:
+                  - !GetAtt WeatherDataBucket.Arn
+                  - !Sub '${WeatherDataBucket.Arn}/*'
+
+  # IAM Role for Glue Crawler (optional, for automated schema discovery)
+  GlueCrawlerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: FittedGlueCrawlerRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: glue.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSGlueServiceRole
+      Policies:
+        - PolicyName: S3Access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                Resource:
+                  - !GetAtt WeatherDataBucket.Arn
+                  - !Sub '${WeatherDataBucket.Arn}/*'
 
 Outputs:
   ApiUrl:
@@ -106,3 +167,11 @@ Outputs:
   WeatherBucket:
     Description: S3 bucket for weather data
     Value: !Ref WeatherDataBucket
+  
+  AthenaDatabase:
+    Description: Athena database name
+    Value: fitted_weather_db
+    
+  GlueCrawlerRoleArn:
+    Description: IAM role ARN for Glue Crawler
+    Value: !GetAtt GlueCrawlerRole.Arn

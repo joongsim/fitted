@@ -10,25 +10,44 @@ This document outlines the plan for creating a scalable, weather-based outfit su
 - **Infrastructure:** AWS (Lambda, API Gateway, S3, CloudWatch)
 - **CI/CD:** AWS SAM/CloudFormation
 
-## Current Architecture (Week 1 Complete)
+## Current Architecture (Week 1-2 Complete)
 
 ```mermaid
 graph TD
-    subgraph AWS Cloud
+    subgraph AWS Cloud - Current
         A[API Gateway] --> B[Lambda: FastAPI]
-        B --> S3[S3 Bucket]
+        B --> S3[S3 Bucket<br/>Weather + Images]
         B --> CW[CloudWatch Logs]
         B --> LLM[OpenRouter API]
+        B --> ATH[Athena<br/>Weather Analytics]
+        S3 --> ATH
     end
     
-    subgraph Future Integration
-        DB[(Databricks)]
+    subgraph Future - Phase 2-3
+        DDB[(DynamoDB<br/>User Profiles)]
+        PG[(PostgreSQL + pgvector<br/>RAG & History)]
+    end
+    
+    subgraph Monetization - Phase 3.5
+        PROD[(Product Catalog<br/>PostgreSQL)]
+        AFF[Affiliate Networks<br/>APIs]
+        TRACK[(Click Tracking<br/>DynamoDB)]
+    end
+    
+    subgraph Future - Phase 4
+        DB[(Databricks<br/>ML & Analytics)]
         AF[Airflow on EC2]
         DBT[dbt Models]
     end
     
     User --> A
-    B -.-> DB
+    B -.Phase 2.-> DDB
+    B -.Phase 3.-> PG
+    PG -.RAG vectors.-> PG
+    B -.Phase 3.5.-> PROD
+    PROD -.affiliate links.-> AFF
+    User -.clicks.-> TRACK
+    B -.Phase 4.-> DB
     AF -.-> DB
     DBT -.-> DB
     
@@ -37,6 +56,46 @@ graph TD
     style S3 fill:#90EE90
     style CW fill:#90EE90
     style LLM fill:#90EE90
+    style ATH fill:#90EE90
+```
+
+## Target Architecture (Hybrid Multi-Database)
+
+```mermaid
+graph TD
+    subgraph User & Transactional Data
+        DDB[DynamoDB<br/>User Profiles & Preferences<br/>Sub-10ms reads]
+        PG[RDS PostgreSQL + pgvector<br/>User-Outfit History & RAG<br/>Vector similarity search]
+    end
+    
+    subgraph Analytics & Storage
+        S3[S3<br/>Weather JSON & Outfit Images<br/>Cost-effective storage]
+        ATH[Athena<br/>Weather Analytics<br/>SQL on S3]
+        DBX[Databricks<br/>Advanced Analytics & ML]
+    end
+    
+    USER[User Request] --> API[API Gateway/Lambda]
+    API --> DDB
+    API --> PG
+    API --> S3
+    DDB -.profile lookup.-> PG
+    PG -.vector search.-> PG
+    PG -.product matching.-> PG
+    S3 --> ATH
+    S3 -.future.-> DBX
+    PG -.ML training.-> DBX
+    
+    API --> LLM[OpenRouter<br/>GPT-4o-mini]
+    
+    subgraph Affiliate System
+        PROD[Product Catalog<br/>PostgreSQL]
+        CLICK[Click Tracking<br/>DynamoDB]
+        AFF[Affiliate Networks]
+    end
+    
+    PG --> PROD
+    USER -.clicks product.-> CLICK
+    PROD -.links.-> AFF
 ```
 
 ## Progress Tracker
@@ -94,14 +153,47 @@ graph TD
 - [ ] Automate dbt runs from Airflow
 - [ ] Build analytics dashboard
 
-### 📅 Future Enhancements
-- [ ] User authentication and profiles
-- [ ] User preference storage in Databricks
-- [ ] Historical outfit tracking
+### 📅 Week 6-8: User Profiles & Authentication
+- [ ] Set up DynamoDB tables for users and preferences
+- [ ] Implement JWT authentication in FastAPI
+- [ ] Create user registration/login endpoints
+- [ ] Add user profile management
+- [ ] Store style preferences (colors, styles, occasions)
+- [ ] Update LLM prompts to include user preferences
+- [ ] Track user usage and interactions
+
+### 📅 Week 9-12: RAG & Outfit Learning
+- [ ] Launch RDS PostgreSQL with pgvector extension
+- [ ] Design schema for outfit catalog and user history
+- [ ] Implement outfit image upload to S3
+- [ ] Generate image embeddings (AWS Rekognition or OpenAI CLIP)
+- [ ] Store embeddings in PostgreSQL for vector search
+- [ ] Implement RAG-based outfit recommendations
+- [ ] Track user outfit selections and satisfaction ratings
+- [ ] Build similarity search for "outfits like this"
+
+### 📅 Week 13-16: Affiliate Monetization
+- [ ] Research and select affiliate networks (Amazon, ShopStyle, Rakuten)
+- [ ] Sign up for affiliate programs
+- [ ] Create product catalog schema in PostgreSQL
+- [ ] Build product ingestion pipeline
+- [ ] Generate product embeddings for similarity matching
+- [ ] Implement product-to-outfit matching algorithm
+- [ ] Add affiliate click tracking in DynamoDB
+- [ ] Create click-through tracking endpoint
+- [ ] Set up conversion webhook listeners
+- [ ] Build affiliate analytics dashboard
+- [ ] Update LLM prompts to include product recommendations
+- [ ] A/B test product presentation strategies
+
+### 📅 Future Enhancements (Phase 4+)
+- [ ] Databricks integration for ML models
 - [ ] Weather prediction integration
 - [ ] Mobile app interface
-- [ ] A/B testing for outfit suggestions
-- [ ] Machine learning for personalized recommendations
+- [ ] A/B testing framework for outfit suggestions
+- [ ] Advanced machine learning for personalized recommendations
+- [ ] User cohort analysis
+- [ ] Predictive outfit suggestions
 
 ---
 
@@ -599,3 +691,127 @@ databricks configure --token
 ```
 
 You will be prompted to enter your Databricks host and token.
+
+---
+
+## User Profile & RAG Architecture (NEW)
+
+### Overview
+
+Starting in Week 6, we're adding user profiles and RAG-based personalization to the application. This requires a hybrid multi-database architecture.
+
+### Data Model
+
+#### DynamoDB Tables
+
+**users table:**
+```json
+{
+  "user_id": "uuid-123",
+  "email": "user@example.com",
+  "name": "Jane Doe",
+  "created_at": "2024-01-15T10:00:00Z",
+  "last_login": "2024-01-20T15:30:00Z"
+}
+```
+
+**user_preferences table:**
+```json
+{
+  "user_id": "uuid-123",
+  "style_preferences": {
+    "colors": ["blue", "green", "neutral"],
+    "styles": ["casual", "business-casual"],
+    "occasions": ["work", "weekend"],
+    "avoid": ["bright-colors", "formal"]
+  },
+  "size_info": {
+    "top": "M",
+    "bottom": "32",
+    "shoe": "10"
+  }
+}
+```
+
+#### PostgreSQL Schema (with pgvector)
+
+```sql
+-- Outfit catalog with vector embeddings for RAG
+CREATE TABLE outfits (
+  outfit_id UUID PRIMARY KEY,
+  name VARCHAR(255),
+  description TEXT,
+  image_s3_path VARCHAR(500),
+  embedding VECTOR(512),  -- pgvector for semantic similarity
+  style_tags TEXT[],
+  created_at TIMESTAMP
+);
+
+-- User outfit selection history
+CREATE TABLE user_outfit_history (
+  id SERIAL PRIMARY KEY,
+  user_id UUID,
+  outfit_id UUID REFERENCES outfits(outfit_id),
+  weather_temp_c FLOAT,
+  weather_condition VARCHAR(100),
+  location VARCHAR(100),
+  satisfaction_score INT,  -- 1-5 rating
+  worn_date DATE,
+  created_at TIMESTAMP
+);
+
+-- Vector similarity index
+CREATE INDEX ON outfits USING ivfflat (embedding vector_cosine_ops);
+```
+
+### RAG Implementation
+
+**How it works:**
+1. User selects outfit images they like (stored in S3)
+2. Generate embeddings using AWS Rekognition or OpenAI CLIP
+3. Store embeddings in PostgreSQL with pgvector
+4. When suggesting outfits, find similar ones based on:
+   - User's past selections (vector similarity)
+   - Current weather conditions
+   - User style preferences
+
+**Example RAG query:**
+```sql
+-- Find outfits similar to what user liked in similar weather
+SELECT o.*,
+       o.embedding <=> $query_embedding AS similarity
+FROM outfits o
+JOIN user_outfit_history uoh ON o.outfit_id = uoh.outfit_id
+WHERE uoh.user_id = $user_id
+  AND uoh.satisfaction_score >= 4
+  AND ABS(uoh.weather_temp_c - $current_temp) < 5.0
+ORDER BY similarity
+LIMIT 10;
+```
+
+### Cost Estimates
+
+| Phase | Services | Monthly Cost |
+|-------|----------|--------------|
+| Current (Weather only) | Lambda + S3 + Athena | $1-5 |
+| + User Profiles | + DynamoDB | $6-15 |
+| + RAG | + RDS PostgreSQL | $21-45 |
+| + ML Platform | + Databricks | $171-245 |
+
+### Implementation Timeline
+
+- **Weeks 1-2:** Weather analytics with Athena (COMPLETE)
+- **Weeks 3-5:** Enhanced features & validation
+- **Weeks 6-8:** User profiles with DynamoDB
+- **Weeks 9-12:** RAG with PostgreSQL + pgvector
+- **Month 3+:** Databricks ML integration
+
+### Key Technologies
+
+- **DynamoDB:** Fast user lookups, serverless scaling
+- **PostgreSQL + pgvector:** Relational data + vector similarity search
+- **S3:** Weather data + outfit images
+- **Athena:** SQL analytics on weather data
+- **Databricks:** Advanced ML (future phase)
+
+For detailed analysis of alternatives, see [`s3-query-alternatives-updated.md`](s3-query-alternatives-updated.md).
