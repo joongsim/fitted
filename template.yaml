@@ -16,7 +16,7 @@ Resources:
     Metadata:
       BuildMethod: makefile
     Properties:
-      FunctionName: fitted-wardrobe-api
+      FunctionName: !Sub 'fitted-wardrobe-api-${AWS::StackName}'
       CodeUri: .
       Handler: app.main.handler
       Description: Fitted Wardrobe Assistant API
@@ -48,7 +48,7 @@ Resources:
   WeatherDataBucket:
     Type: AWS::S3::Bucket
     Properties:
-      BucketName: !Sub 'fitted-weather-data-${AWS::AccountId}'
+      BucketName: !Sub 'fitted-weather-data-${AWS::StackName}-${AWS::AccountId}'
       VersioningConfiguration:
         Status: Enabled
       PublicAccessBlockConfiguration:
