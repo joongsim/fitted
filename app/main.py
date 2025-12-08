@@ -12,7 +12,8 @@ from app.services.analysis_service import query_weather_file
 app = FastAPI()
 
 # Lambda handler - this is what AWS Lambda will call
-handler = Mangum(app)
+# Configure Mangum with lifespan="off" to avoid async context issues in Lambda
+handler = Mangum(app, lifespan="off", api_gateway_base_path="/")
 
 @app.get("/")
 def read_root():
