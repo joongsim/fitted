@@ -69,7 +69,7 @@ CREATE EXTERNAL TABLE IF NOT EXISTS fitted_weather_db.weather_data (
         localtime_epoch: BIGINT,
         localtime: STRING
     >,
-    current STRUCT<
+    `current` STRUCT<
         last_updated_epoch: BIGINT,
         last_updated: STRING,
         temp_c: DOUBLE,
@@ -179,11 +179,12 @@ You can also write custom SQL queries:
 from app.services.analysis_service import athena_service
 
 # Custom query
+# Note: Use backticks around `current` as it's a reserved keyword
 query = """
-SELECT 
+SELECT
     location.country,
     COUNT(DISTINCT location.name) as city_count,
-    AVG(current.temp_c) as avg_temp
+    AVG(`current`.temp_c) as avg_temp
 FROM fitted_weather_db.weather_data
 WHERE dt = '2024-01-15'
 GROUP BY location.country
@@ -209,13 +210,28 @@ Athena charges $5 per TB of data scanned. To minimize costs:
 SELECT * FROM weather_data;
 
 -- GOOD: Uses partition + limit
-SELECT 
-    location.name, 
-    current.temp_c 
-FROM weather_data 
+-- Note: `current` is escaped with backticks (reserved keyword)
+SELECT
+    location.name,
+    `current`.temp_c
+FROM weather_data
 WHERE dt = '2024-01-15'  -- Partition filter
 LIMIT 100;
 ```
+
+## Important: Reserved Keywords
+
+The `current` field must be escaped with backticks because it's a reserved keyword in Athena:
+
+```sql
+-- WRONG (will fail)
+SELECT current.temp_c FROM weather_data
+
+-- CORRECT
+SELECT `current`.temp_c FROM weather_data
+```
+
+All queries in the analytics service handle this automatically.
 
 ## Troubleshooting
 
