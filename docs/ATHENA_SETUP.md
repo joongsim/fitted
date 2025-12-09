@@ -90,8 +90,7 @@ CREATE EXTERNAL TABLE IF NOT EXISTS fitted_weather_db.weather_data (
     >
 )
 PARTITIONED BY (
-    dt STRING,
-    location_name STRING
+    dt STRING
 )
 ROW FORMAT SERDE 'org.openx.data.jsonserde.JsonSerDe'
 LOCATION 's3://your-bucket-name/raw/weather/'
@@ -100,9 +99,13 @@ TBLPROPERTIES (
     'projection.dt.type' = 'date',
     'projection.dt.format' = 'yyyy-MM-dd',
     'projection.dt.range' = '2024-01-01,NOW',
-    'projection.location_name.type' = 'injected',
-    'storage.location.template' = 's3://your-bucket-name/raw/weather/dt=${dt}/location=${location_name}/'
+    'projection.dt.interval' = '1',
+    'projection.dt.interval.unit' = 'DAYS',
+    'storage.location.template' = 's3://your-bucket-name/raw/weather/dt=${dt}/'
 );
+```
+
+**Note:** The table is partitioned by date only. The S3 structure includes location folders (`/location=city/`), but these are just part of the file path, not partition keys. This allows flexible querying without partition constraints.
 ```
 
 ## Using the Analytics API

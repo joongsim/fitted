@@ -105,8 +105,7 @@ def setup_athena_table():
         >
     )
     PARTITIONED BY (
-        dt STRING,
-        location_name STRING
+        dt STRING
     )
     ROW FORMAT SERDE 'org.openx.data.jsonserde.JsonSerDe'
     LOCATION 's3://{bucket_name}/raw/weather/'
@@ -117,8 +116,7 @@ def setup_athena_table():
         'projection.dt.range' = '2024-01-01,NOW',
         'projection.dt.interval' = '1',
         'projection.dt.interval.unit' = 'DAYS',
-        'projection.location_name.type' = 'injected',
-        'storage.location.template' = 's3://{bucket_name}/raw/weather/dt=${{dt}}/location=${{location_name}}/'
+        'storage.location.template' = 's3://{bucket_name}/raw/weather/dt=${{dt}}/'
     )
     """
     
