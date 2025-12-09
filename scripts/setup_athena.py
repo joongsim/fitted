@@ -71,7 +71,7 @@ def setup_athena_table():
     output_location = f"s3://{bucket_name}/athena-results/"
     
     # Create external table with partitions
-    # Note: 'current' is escaped with backticks because it's a reserved keyword
+    # Note: Field named 'curr' instead of 'current' to avoid reserved keyword
     create_table_query = f"""
     CREATE EXTERNAL TABLE IF NOT EXISTS {database_name}.{table_name} (
         location STRUCT<
@@ -84,7 +84,7 @@ def setup_athena_table():
             localtime_epoch: BIGINT,
             localtime: STRING
         >,
-        `current` STRUCT<
+        curr STRUCT<
             last_updated_epoch: BIGINT,
             last_updated: STRING,
             temp_c: DOUBLE,
