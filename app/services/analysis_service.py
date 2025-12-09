@@ -142,14 +142,14 @@ def query_weather_by_temperature(min_temp: float = 15.0,
     SELECT
         location.name as location,
         location.country as country,
-        current.temp_c as temperature_c,
-        current.condition.text as condition_text,
-        current.humidity as humidity,
+        `current`.temp_c as temperature_c,
+        `current`.condition.text as condition_text,
+        `current`.humidity as humidity,
         dt as date
     FROM {athena_service.table}
-    WHERE current.temp_c > {min_temp}
+    WHERE `current`.temp_c > {min_temp}
     {date_filter}
-    ORDER BY current.temp_c DESC
+    ORDER BY `current`.temp_c DESC
     LIMIT 100
     """
     
@@ -181,10 +181,10 @@ def get_location_weather_trend(location: str, days: int = 7) -> List[Dict[str, A
     SELECT
         dt as date,
         location.name as location,
-        AVG(current.temp_c) as avg_temp_c,
-        MAX(current.temp_c) as max_temp_c,
-        MIN(current.temp_c) as min_temp_c,
-        AVG(current.humidity) as avg_humidity,
+        AVG(`current`.temp_c) as avg_temp_c,
+        MAX(`current`.temp_c) as max_temp_c,
+        MIN(`current`.temp_c) as min_temp_c,
+        AVG(`current`.humidity) as avg_humidity,
         COUNT(*) as num_readings
     FROM {athena_service.table}
     WHERE location.name LIKE '%{location}%'
@@ -218,10 +218,10 @@ def get_weather_analytics_summary(date: Optional[str] = None) -> Dict[str, Any]:
     query = f"""
     SELECT
         COUNT(DISTINCT location.name) as unique_locations,
-        AVG(current.temp_c) as avg_temperature,
-        MAX(current.temp_c) as max_temperature,
-        MIN(current.temp_c) as min_temperature,
-        AVG(current.humidity) as avg_humidity,
+        AVG(`current`.temp_c) as avg_temperature,
+        MAX(`current`.temp_c) as max_temperature,
+        MIN(`current`.temp_c) as min_temperature,
+        AVG(`current`.humidity) as avg_humidity,
         COUNT(*) as total_readings
     FROM {athena_service.table}
     WHERE dt = '{date}'
@@ -256,12 +256,12 @@ def get_weather_by_condition(condition: str, date: Optional[str] = None) -> List
     SELECT
         location.name as location,
         location.country as country,
-        current.temp_c as temperature_c,
-        current.condition.text as condition,
-        current.humidity as humidity,
+        `current`.temp_c as temperature_c,
+        `current`.condition.text as condition,
+        `current`.humidity as humidity,
         dt as date
     FROM {athena_service.table}
-    WHERE LOWER(current.condition.text) LIKE LOWER('%{condition}%')
+    WHERE LOWER(`current`.condition.text) LIKE LOWER('%{condition}%')
     {date_filter}
     LIMIT 100
     """
