@@ -116,23 +116,31 @@ graph TD
 **Cost:** $0/month (within free tier)
 **URL:** https://e2d6c3y53g.execute-api.us-west-1.amazonaws.com/
 
-### 🔄 Week 2: Real Weather Data Integration (IN PROGRESS)
+### ✅ Week 2: Real Weather Data Integration (COMPLETE)
 - [x] Sign up for Weather API service
 - [x] Implement real weather API integration
 - [x] Store weather data in S3
 - [x] Create data lake structure (Bronze/Silver/Gold)
 - [x] Update Lambda to use real weather data
-- [ ] Add data validation and error handling (Pydantic models)
-- [ ] Implement caching strategy (S3 fallback)
-- [ ] Create basic analytics queries
+- [x] Add data validation and error handling (Pydantic models)
+- [x] Implement caching strategy (S3 fallback - memory + S3)
+- [x] Create basic analytics queries (AWS Athena with SQL)
+- [x] Set up Athena database and table with partition projection
+- [x] Create analytics API endpoints (temperature, location trends, summary, conditions)
+- [x] Add IAM permissions for Athena and Glue
+- [x] Create Glue Crawler role for schema discovery
 
-### 📅 Week 3: Enhanced Features & Validation
-- [ ] Create Pydantic models for weather data validation
+**Status:** Real weather data integration complete with Athena analytics
+**Cost:** ~$1-5/month (Athena queries)
+**New Endpoints:** `/analytics/temperature`, `/analytics/location/{location}`, `/analytics/summary`, `/analytics/condition/{condition}`
+
+### 🔄 Week 3: Enhanced Features & Validation (IN PROGRESS)
+- [x] Create Pydantic models for weather data validation
+- [x] Implement caching strategy (S3 fallback)
 - [ ] Update `weather_service.py` to fetch forecast data
 - [ ] Implement missing API endpoints (`/weather/{location}`, `/forecast`, `/history`)
 - [ ] Enhance `llm_service.py` to include forecast context
-- [ ] Improve caching strategy (S3 fallback)
-- [ ] Update documentation
+- [ ] Update documentation with new features
 
 ### 📅 Week 4: Airflow Orchestration
 - [ ] Launch EC2 t3.micro instance
@@ -789,22 +797,35 @@ ORDER BY similarity
 LIMIT 10;
 ```
 
-### Cost Estimates
+### Cost Estimates & Revenue Projections
 
-| Phase | Services | Monthly Cost |
-|-------|----------|--------------|
-| Current (Weather only) | Lambda + S3 + Athena | $1-5 |
-| + User Profiles | + DynamoDB | $6-15 |
-| + RAG | + RDS PostgreSQL | $21-45 |
-| + ML Platform | + Databricks | $171-245 |
+| Phase | Services | Monthly Cost | Revenue Potential |
+|-------|----------|--------------|-------------------|
+| Current (Weather only) | Lambda + S3 + Athena | $1-5 | $0 |
+| + User Profiles | + DynamoDB | $6-15 | $0 |
+| + RAG | + RDS PostgreSQL | $21-45 | $0 |
+| + Affiliates | + Click tracking | $26-50 | **$75-750** |
+| + ML Platform | + Databricks | $176-250 | $750+ |
+
+**Affiliate Revenue Model:**
+- Average order value: $100
+- Commission rate: 5% average
+- Conversion rate: 2-5%
+- Revenue at 1,000 active users: ~$75/month
+- Revenue at 10,000 active users: ~$750/month
+
+**Break-even:**
+- With affiliates: 350-700 active users
+- With ML platform: 2,500-3,500 active users
 
 ### Implementation Timeline
 
-- **Weeks 1-2:** Weather analytics with Athena (COMPLETE)
-- **Weeks 3-5:** Enhanced features & validation
+- **Weeks 1-2:** Weather analytics with Athena ✅ (COMPLETE)
+- **Weeks 3-5:** Enhanced features & validation 🔄 (IN PROGRESS)
 - **Weeks 6-8:** User profiles with DynamoDB
 - **Weeks 9-12:** RAG with PostgreSQL + pgvector
-- **Month 3+:** Databricks ML integration
+- **Weeks 13-16:** Affiliate monetization
+- **Month 4+:** Databricks ML integration
 
 ### Key Technologies
 
@@ -814,4 +835,24 @@ LIMIT 10;
 - **Athena:** SQL analytics on weather data
 - **Databricks:** Advanced ML (future phase)
 
+### Affiliate Networks
+
+**Recommended Networks:**
+1. **Amazon Associates** - Largest selection, 1-10% commission
+2. **ShopStyle Collective** - Fashion-focused, good UI
+3. **Rakuten Advertising** - Mid-tier brands, 5-15% commission
+4. **Commission junction** - Many retailers
+5. **ShareASale** - Indie brands, niche fashion
+
+**Integration Strategy:**
+- Start with Amazon (easy integration, broad catalog)
+- Add ShopStyle for fashion-specific items
+- Expand to others based on conversion data
+
 For detailed analysis of alternatives, see [`s3-query-alternatives-updated.md`](s3-query-alternatives-updated.md).
+
+### Related Documentation
+
+- **Athena Setup:** [`docs/ATHENA_SETUP.md`](docs/ATHENA_SETUP.md) - Complete guide for AWS Athena analytics
+- **Phase 2 Summary:** [`docs/personal/PHASE2_COMPLETION.md`](docs/personal/PHASE2_COMPLETION.md) - Week 2 implementation details
+- **Architecture Analysis:** [`s3-query-alternatives-updated.md`](s3-query-alternatives-updated.md) - Database strategy and comparisons
