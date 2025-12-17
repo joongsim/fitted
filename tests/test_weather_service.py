@@ -3,9 +3,10 @@ import os
 import httpx
 from unittest.mock import patch, AsyncMock, MagicMock
 from fastapi import HTTPException
-from app.services import weather_service
+from app.services import weather_service, llm_service
 from app.models.weather import (
     WeatherResponse,
+    WeatherWithForecast,
     CurrentWeather,
     Location,
     WeatherCondition,
@@ -49,10 +50,13 @@ MOCK_WEATHER_RESPONSE = {
 @pytest.mark.asyncio
 async def test_get_weather_data_no_api_key():
     """Test fallback to mock data when API key is missing"""
-    with patch.dict(os.environ, {}, clear=True):
-        # Reload module to pick up empty env
-        # Note: In a real scenario, we might need to reload the module or patch the variable directly
-        with patch("app.services.weather_service.WEATHER_API_KEY", None):
+    # Clear cache to ensure we don't get cached data
+    weather_service._weather_cache.clear()
+    
+    # Mock config.get_parameter to raise an exception (simulating no API key)
+    with patch("app.core.config.config.get_parameter", side_effect=Exception("No API key")):
+        # Mock S3 operations to avoid S3 errors
+        with patch("boto3.client"):
             data = await weather_service.get_weather_data("Tokyo")
             assert data["location"]["name"] == "Tokyo"
             assert data["current"]["temp_c"] == 5.2  # Mock data value
@@ -61,57 +65,69 @@ async def test_get_weather_data_no_api_key():
 @pytest.mark.asyncio
 async def test_get_weather_data_success():
     """Test successful API call and S3 storage"""
-    with patch("app.services.weather_service.WEATHER_API_KEY", "fake-key"):
-        with patch("httpx.AsyncClient") as mock_client:
-            # Setup mock response
-            mock_response = MagicMock()
-            mock_response.status_code = 200
-            mock_response.json.return_value = MOCK_WEATHER_RESPONSE
+    # Clear cache to ensure we don't get cached data
+    weather_service._weather_cache.clear()
+    
+    # Mock config.get_parameter to return fake API key
+    with patch("app.core.config.config.get_parameter", return_value="fake-key"):
+        # Mock S3 operations to avoid S3 errors
+        with patch("boto3.client"):
+            with patch("httpx.AsyncClient") as mock_client:
+                # Setup mock response
+                mock_response = MagicMock()
+                mock_response.status_code = 200
+                mock_response.json.return_value = MOCK_WEATHER_RESPONSE
 
-            # Setup async context manager for client
-            mock_client_instance = AsyncMock()
-            mock_client_instance.get.return_value = mock_response
-            mock_client.return_value.__aenter__.return_value = mock_client_instance
+                # Setup async context manager for client
+                mock_client_instance = AsyncMock()
+                mock_client_instance.get.return_value = mock_response
+                mock_client.return_value.__aenter__.return_value = mock_client_instance
 
-            # Mock storage service
-            with patch(
-                "app.services.weather_service.store_raw_weather_data",
-                new_callable=AsyncMock,
-            ) as mock_store:
-                data = await weather_service.get_weather_data("London")
+                # Mock storage service
+                with patch(
+                    "app.services.weather_service.store_raw_weather_data",
+                    new_callable=AsyncMock,
+                ) as mock_store:
+                    data = await weather_service.get_weather_data("London")
 
-                # Verify response
-                assert data == MOCK_WEATHER_RESPONSE
+                    # Verify response
+                    assert data == MOCK_WEATHER_RESPONSE
 
-                # Verify API was called correctly
-                mock_client_instance.get.assert_called_once()
-                call_args = mock_client_instance.get.call_args
-                assert "London" in call_args[1]["params"]["q"]
+                    # Verify API was called correctly
+                    mock_client_instance.get.assert_called_once()
+                    call_args = mock_client_instance.get.call_args
+                    assert "London" in call_args[1]["params"]["q"]
 
-                # Verify storage was called
-                mock_store.assert_called_once_with("London", MOCK_WEATHER_RESPONSE)
+                    # Verify storage was called
+                    mock_store.assert_called_once_with("London", MOCK_WEATHER_RESPONSE)
 
 
 @pytest.mark.asyncio
 async def test_get_weather_data_api_error():
     """Test handling of API errors"""
-    with patch("app.services.weather_service.WEATHER_API_KEY", "fake-key"):
-        with patch("httpx.AsyncClient") as mock_client:
-            # Setup mock error response
-            mock_response = MagicMock()
-            mock_response.status_code = 404
-            mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
-                "Not Found", request=MagicMock(), response=mock_response
-            )
+    # Clear cache to ensure we don't get cached data
+    weather_service._weather_cache.clear()
+    
+    # Mock config.get_parameter to return fake API key
+    with patch("app.core.config.config.get_parameter", return_value="fake-key"):
+        # Mock S3 operations to avoid S3 errors
+        with patch("boto3.client"):
+            with patch("httpx.AsyncClient") as mock_client:
+                # Setup mock error response
+                mock_response = MagicMock()
+                mock_response.status_code = 404
+                mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
+                    "Not Found", request=MagicMock(), response=mock_response
+                )
 
-            mock_client_instance = AsyncMock()
-            mock_client_instance.get.return_value = mock_response
-            mock_client.return_value.__aenter__.return_value = mock_client_instance
+                mock_client_instance = AsyncMock()
+                mock_client_instance.get.return_value = mock_response
+                mock_client.return_value.__aenter__.return_value = mock_client_instance
 
-            with pytest.raises(HTTPException) as exc:
-                await weather_service.get_weather_data("InvalidCity")
+                with pytest.raises(HTTPException) as exc:
+                    await weather_service.get_weather_data("InvalidCity")
 
-            assert exc.value.status_code == 404
+                assert exc.value.status_code == 404
 
 
 @pytest.mark.asyncio
@@ -120,16 +136,19 @@ async def test_get_weather_data_network_error():
     # Clear cache to ensure we hit the network
     weather_service._weather_cache.clear()
 
-    with patch("app.services.weather_service.WEATHER_API_KEY", "fake-key"):
-        with patch("httpx.AsyncClient") as mock_client:
-            mock_client_instance = AsyncMock()
-            mock_client_instance.get.side_effect = Exception("Network Error")
-            mock_client.return_value.__aenter__.return_value = mock_client_instance
+    # Mock config.get_parameter to return fake API key
+    with patch("app.core.config.config.get_parameter", return_value="fake-key"):
+        # Mock S3 operations to avoid S3 errors
+        with patch("boto3.client"):
+            with patch("httpx.AsyncClient") as mock_client:
+                mock_client_instance = AsyncMock()
+                mock_client_instance.get.side_effect = Exception("Network Error")
+                mock_client.return_value.__aenter__.return_value = mock_client_instance
 
-            with pytest.raises(HTTPException) as exc:
-                await weather_service.get_weather_data("London")
+                with pytest.raises(HTTPException) as exc:
+                    await weather_service.get_weather_data("London")
 
-            assert exc.value.status_code == 503
+                assert exc.value.status_code == 503
 
 
 def test_valid_weather_response():
@@ -183,3 +202,69 @@ def test_missing_required_field():
     # Verify the error message points to the missing field
     assert "location" in str(exc_info.value)
     assert "Field required" in str(exc_info.value)
+    
+
+@pytest.mark.asyncio
+async def test_forecast_data_structure():
+    """Test forecast data returns correct structure"""
+    data = await weather_service.get_weather_with_forecast("London", days=3)
+    
+    assert "location" in data
+    assert "current" in data
+    assert "forecast" in data
+    assert "forecastday" in data["forecast"]
+    assert len(data["forecast"]["forecastday"]) == 3
+
+
+@pytest.mark.asyncio
+async def test_forecast_validation():
+    """Test Pydantic validation of forecast data"""
+    # Free tier API typically returns max 3 days
+    data = await weather_service.get_weather_with_forecast("Paris", days=3)
+    
+    # Should not raise validation error
+    validated = WeatherWithForecast(**data)
+    assert validated.forecast is not None
+    # API may return less days than requested on free tier
+    assert len(validated.forecast.forecastday) >= 1
+    assert len(validated.forecast.forecastday) <= 3
+
+
+@pytest.mark.asyncio
+async def test_llm_with_forecast():
+    """Test LLM suggestions include forecast context"""
+    forecast = [
+        {
+            "date": "2024-12-10",
+            "min_temp_c": 12,
+            "max_temp_c": 18,
+            "condition": "Partly cloudy",
+            "chance_of_rain": 20
+        }
+    ]
+    
+    suggestion = await llm_service.get_outfit_suggestion(
+        location="Tokyo",
+        temp_c=15,
+        condition="Clear",
+        forecast=forecast
+    )
+    
+    assert len(suggestion) > 50  # Should be a meaningful suggestion
+    assert isinstance(suggestion, str)
+
+
+@pytest.mark.asyncio
+async def test_weather_endpoints_exist():
+    """Test that new endpoints are registered"""
+    from app.main import app
+    from fastapi.testclient import TestClient
+    
+    client = TestClient(app)
+    
+    # Test endpoint availability
+    response = client.get("/weather/London")
+    assert response.status_code in [200, 500]  # May fail without API key
+    
+    response = client.get("/weather/London/forecast")
+    assert response.status_code in [200, 500]

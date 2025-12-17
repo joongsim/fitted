@@ -17,24 +17,21 @@ except Exception as e:
 WEATHER_BUCKET = os.environ.get('WEATHER_BUCKET_NAME')
 IS_LOCAL = os.environ.get('IS_LOCAL', 'false').lower() == 'true'
 
-async def store_raw_weather_data(location: str, data: dict):
+async def store_raw_weather_data(location: str, data: dict, is_forecast: bool = False):
     """
     Store raw weather API response in S3 (Bronze Layer).
     
     Args:
         location: The location name (e.g., "London")
         data: The raw JSON response from the weather API
+        is_forecast: Whether the data includes forecast information
     """
     if IS_LOCAL:
         print(f"ℹ️  Running locally. Skipping S3 upload for {location}.")
         return
 
-    if not s3_client:
-        print("Warning: S3 client not initialized. Skipping S3 storage.")
-        return
-
-    if not WEATHER_BUCKET:
-        print("Warning: WEATHER_BUCKET_NAME not set. Skipping S3 storage.")
+    if not s3_client or not WEATHER_BUCKET:
+        print("Warning: S3 client or WEATHER_BUCKET_NAME not set. Skipping S3 storage.")
         return
 
     try:
@@ -47,7 +44,8 @@ async def store_raw_weather_data(location: str, data: dict):
         # Sanitize location for S3 key
         safe_location = "".join(c for c in location if c.isalnum() or c in ('-', '_')).lower()
         
-        key = f"raw/weather/dt={date_partition}/location={safe_location}/{time_partition}.json"
+        data_type = "forecast" if is_forecast else "current"
+        key = f"raw/weather/{data_type}/dt={date_partition}/location={safe_location}/{time_partition}.json"
         
         # Run the blocking S3 call in a separate thread
         loop = asyncio.get_running_loop()
@@ -58,10 +56,14 @@ async def store_raw_weather_data(location: str, data: dict):
                 Bucket=WEATHER_BUCKET,
                 Key=key,
                 Body=json.dumps(data),
-                ContentType='application/json'
+                ContentType='application/json',
+                Metadata={
+                    'data-type': data_type,
+                    'location': safe_location
+                }
             )
         )
-        print(f"Successfully stored weather data to s3://{WEATHER_BUCKET}/{key}")
+        print(f"Successfully stored {data_type} weather data to s3://{WEATHER_BUCKET}/{key}")
         
     except ClientError as e:
         print(f"Error storing data in S3: {e}")

@@ -157,3 +157,115 @@ async def get_weather_data(location: str):
             # Handle network errors or other unexpected issues
             print(f"Unexpected error: {e}")
             raise HTTPException(status_code=503, detail="Service unavailable")
+
+async def get_weather_with_forecast(location: str, days: int = 1) -> dict:
+    """
+    Fetch current weather plus forecast data.
+    
+    Args:
+        location: Location name or coordinates
+        days: Number of forecast days (1-10, default 0)
+        
+    Returns:
+        Dictionary with current weather and forecast
+    """
+    # Validate days parameter
+    if not 1 <= days <= 10:
+        days = 1
+    
+    # Check cache first (cache key includes days)
+    cache_key = f"{location}:{days}"
+    if cache_key in _weather_cache:
+        data, timestamp = _weather_cache[cache_key]
+        if time.time() - timestamp < CACHE_TTL:
+            print(f"Returning cached forecast data for {location}")
+            return data
+        else:
+            del _weather_cache[cache_key]
+    
+    # Check if we have API key
+    try:
+        weather_api_key = config.weather_api_key
+    except Exception as e:
+        print(f"⚠️ No API key found: {e}. Using mock data.")
+        return await _get_mock_forecast_data(location, days)
+    
+    # Fetch from API
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(
+                f"{BASE_URL}/forecast.json",
+                params={
+                    "key": weather_api_key,
+                    "q": location,
+                    "days": days,
+                    "aqi": "no"
+                },
+                timeout=10.0
+            )
+            
+            response.raise_for_status()
+            data = response.json()
+            
+            # Validate with Pydantic
+            from app.models.weather import WeatherWithForecast
+            validated_data = WeatherWithForecast(**data)
+            
+            # Store in S3 (with forecast flag in key)
+            await store_raw_weather_data(
+                location, 
+                validated_data.model_dump(),
+                is_forecast=True
+            )
+            
+            # Cache the result
+            _weather_cache[cache_key] = (validated_data.model_dump(), time.time())
+            
+            return validated_data.model_dump()
+            
+        except httpx.HTTPStatusError as e:
+            print(f"API Error: {e}")
+            raise HTTPException(
+                status_code=e.response.status_code,
+                detail="Weather forecast service error"
+            )
+        except Exception as e:
+            print(f"Unexpected error: {e}")
+            raise HTTPException(status_code=503, detail="Service unavailable")
+
+async def _get_mock_forecast_data(location: str, days: int = 1) -> dict:
+    """Mock forecast data for testing without API key"""
+    current_data = await _get_mock_data(location)
+    
+    # Generate simple forecast (temperature variation)
+    forecast_days = []
+    base_temp = current_data['current']['temp_c']
+    
+    for i in range(days):
+        forecast_days.append({
+            "date": f"2024-12-{9+i:02d}",
+            "date_epoch": 1733788800 + (i * 86400),
+            "day": {
+                "maxtemp_c": base_temp + (i * 2),
+                "mintemp_c": base_temp - 3,
+                "avgtemp_c": base_temp + (i * 0.5),
+                "condition": {
+                    "text": "Partly cloudy",
+                    "icon": "//cdn.weatherapi.com/weather/64x64/day/116.png"
+                }
+            },
+            "astro": {
+                "sunrise": "07:00 AM",
+                "sunset": "05:00 PM"
+            }
+        })
+    
+    return {
+        **current_data,
+        "forecast": {
+            "forecastday": forecast_days
+        }
+    }
+    
+    
+    
