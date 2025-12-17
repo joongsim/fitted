@@ -258,7 +258,7 @@ async def get_current_weather(location:str) -> dict:
 @app.get("/weather/{location}/forecast")
 async def get_weather_forecast(
     location: str,
-    days: int = Query(3, ge=1, le=10, description="Number of forecast days")
+    days: int = Query(1, ge=1, le=10, description="Number of forecast days")
 ):
     """
     Get weather forecast for a location.
