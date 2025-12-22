@@ -3,6 +3,7 @@ from datetime import datetime
 from typing import Optional
 import boto3
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 from mangum import Mangum
 from app.services import weather_service
 from app.services import llm_service
@@ -10,6 +11,15 @@ from app.core.config import config
 from app.services import analysis_service
 
 app = FastAPI()
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # In production, replace with your frontend URL
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Lambda handler - this is what AWS Lambda will call
 # Configure Mangum with lifespan="off" to avoid async context issues in Lambda
@@ -96,7 +106,10 @@ async def suggest_outfit(
                     "temp_c": temp_c,
                     "temp_f": weather_data["current"]["temp_f"],
                     "condition": condition,
-                    "humidity": weather_data["current"]["humidity"]
+                    "humidity": weather_data["current"]["humidity"],
+                    "wind_kph": weather_data["current"]["wind_kph"],
+                    "feelslike_c": weather_data["current"]["feelslike_c"],
+                    "uv": weather_data["current"]["uv"]
                 },
                 "forecast": formatted_forecast if include_forecast else None
             },

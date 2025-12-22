@@ -100,7 +100,7 @@ async def get_outfit_suggestion(
         
         # Call OpenRouter API using AsyncOpenAI client
         response = await client.chat.completions.create(
-            model="openai/gpt-5.2",
+            model="google/gemini-2.0-flash-exp:free",
             messages=[
                 {
                     "role": "system",
