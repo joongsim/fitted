@@ -103,3 +103,4 @@ uvloop==0.22.1
 watchfiles==1.1.1
 websockets==15.0.1
 zipp==3.23.0
+reflex==0.6.8
