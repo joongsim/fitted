@@ -22,7 +22,15 @@ class State(rx.State):
     feelslike_c: str = ""
     uv: str = ""
     
-    outfit_suggestion: str = ""
+    # Track the confirmed location for the display
+    display_location: str = ""
+    
+    # Outfit fields
+    outfit_top: str = ""
+    outfit_bottom: str = ""
+    outfit_outerwear: str = ""
+    outfit_accessories: str = ""
+    
     has_results: bool = False
 
     async def get_outfit(self, form_data: Dict[str, Any]):
@@ -83,7 +91,22 @@ class State(rx.State):
                 self.feelslike_c = str(weather.get("feelslike_c", ""))
                 self.uv = str(weather.get("uv", ""))
                 
-                self.outfit_suggestion = data.get("outfit_suggestion", "")
+                # Update display location only on successful fetch
+                self.display_location = self.location
+                
+                outfit = data.get("outfit_suggestion", {})
+                if isinstance(outfit, dict):
+                    self.outfit_top = outfit.get("top", "None")
+                    self.outfit_bottom = outfit.get("bottom", "None")
+                    self.outfit_outerwear = outfit.get("outerwear", "None")
+                    self.outfit_accessories = outfit.get("accessories", "None")
+                else:
+                    # Fallback if it's still a string for some reason
+                    self.outfit_top = str(outfit)
+                    self.outfit_bottom = ""
+                    self.outfit_outerwear = ""
+                    self.outfit_accessories = ""
+                
                 self.has_results = True
                 
         except Exception as e:
@@ -107,6 +130,21 @@ def metric_card(label: str, value: rx.Var, icon: str) -> rx.Component:
         ),
         padding="3",
         variant="surface",
+    )
+
+def outfit_item(label: str, value: rx.Var) -> rx.Component:
+    """A themed container for an outfit item."""
+    return rx.box(
+        rx.vstack(
+            rx.text(label, size="1", color_scheme="gray", weight="bold", text_transform="uppercase"),
+            rx.text(value, size="3"),
+            spacing="1",
+            align_items="start",
+        ),
+        padding="3",
+        background="gray.300",
+        border_radius="md",
+        width="100%",
     )
 
 def index() -> rx.Component:
@@ -165,7 +203,7 @@ def index() -> rx.Component:
                                 ),
                                 rx.spacer(),
                                 rx.vstack(
-                                    rx.text(State.location, weight="bold", size="5"),
+                                    rx.text(State.display_location, weight="bold", size="5"),
                                     rx.text("Current Weather", size="2", color_scheme="gray"),
                                     align="end",
                                 ),
@@ -193,11 +231,19 @@ def index() -> rx.Component:
                     # Outfit Suggestion
                     rx.vstack(
                         rx.heading("Stylist Recommendation", size="5", margin_top="6", align_self="start"),
-                        rx.card(
-                            rx.text(State.outfit_suggestion, size="4", line_height="1.6"),
+                        rx.vstack(
+                            outfit_item("Top", State.outfit_top),
+                            outfit_item("Bottom", State.outfit_bottom),
+                            rx.cond(
+                                State.outfit_outerwear != "None",
+                                outfit_item("Outerwear", State.outfit_outerwear),
+                            ),
+                            rx.cond(
+                                State.outfit_accessories != "None",
+                                outfit_item("Accessories", State.outfit_accessories),
+                            ),
                             width="100%",
-                            padding="6",
-                            background_color=rx.color("accent", 2),
+                            spacing="3",
                         ),
                         width="100%",
                         spacing="3",
