@@ -232,7 +232,7 @@ async def test_forecast_validation():
 
 @pytest.mark.asyncio
 async def test_llm_with_forecast():
-    """Test LLM suggestions include forecast context"""
+    """Test LLM suggestions include forecast context and return structured JSON"""
     forecast = [
         {
             "date": "2024-12-10",
@@ -250,8 +250,19 @@ async def test_llm_with_forecast():
         forecast=forecast
     )
     
-    assert len(suggestion) > 50  # Should be a meaningful suggestion
-    assert isinstance(suggestion, str)
+    # Verify structure
+    assert isinstance(suggestion, dict)
+    assert "top" in suggestion
+    assert "bottom" in suggestion
+    assert "outerwear" in suggestion
+    assert "accessories" in suggestion
+    
+    # Verify content types
+    assert isinstance(suggestion["top"], str)
+    assert isinstance(suggestion["bottom"], str)
+    assert isinstance(suggestion["outerwear"], str)
+    assert isinstance(suggestion["accessories"], str)
+
 
 
 @pytest.mark.asyncio

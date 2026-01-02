@@ -9,6 +9,7 @@ aws/
 
 # Private documentation (review before committing)
 docs/private/
+.cursor/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
