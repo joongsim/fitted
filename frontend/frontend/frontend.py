@@ -4,7 +4,9 @@ import json
 from typing import Optional, Dict, Any
 
 # API Configuration
-API_BASE_URL = "https://e2d6c3y53g.execute-api.us-west-1.amazonaws.com"
+import os
+API_BASE_URL = os.environ.get("API_BASE_URL", "http://localhost:8000")
+# API_BASE_URL = "https://e2d6c3y53g.execute-api.us-west-1.amazonaws.com"
 
 class State(rx.State):
     """The app state."""
