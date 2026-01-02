@@ -85,12 +85,15 @@ async def get_outfit_suggestion(
         {weather_context}
 
         Please provide:
-        0. A summary of the current conditions and today's forecast
-        1. A complete outfit (top, bottom, shoes, outerwear if needed)
-        2. Any accessories recommendations (umbrella, sunglasses, etc.)
-        3. Tips for staying comfortable throughout the day
+        1. A complete outfit (top, bottom, shoes, outerwear if needed), include color combinations using color theory.
+        2. Any accessories recommendations (umbrella, sunglasses, etc.), based on current weather and forecast.
 
-        Keep the suggestion concise (1-2 sentences) and practical."""
+        Keep the response concise and practical. Do not include any other text or commentary.
+        Give the response in bullet points. One bullet point per item. Only include text about the items in the response.
+        
+        
+        """
+        
 
     try:
         # Get OpenRouter client
@@ -100,7 +103,7 @@ async def get_outfit_suggestion(
         
         # Call OpenRouter API using AsyncOpenAI client
         response = await client.chat.completions.create(
-            model="google/gemini-2.0-flash-exp:free",
+            model="google/gemini-3-flash-preview",
             messages=[
                 {
                     "role": "system",
