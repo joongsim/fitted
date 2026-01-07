@@ -26,12 +26,19 @@ async def store_raw_weather_data(location: str, data: dict, is_forecast: bool = 
         data: The raw JSON response from the weather API
         is_forecast: Whether the data includes forecast information
     """
-    if IS_LOCAL:
+    # Check if we are running in Lambda or locally
+    is_lambda = os.environ.get('AWS_EXECUTION_ENV') is not None
+    
+    if IS_LOCAL and not is_lambda:
         print(f"ℹ️  Running locally. Skipping S3 upload for {location}.")
         return
 
-    if not s3_client or not WEATHER_BUCKET:
-        print("Warning: S3 client or WEATHER_BUCKET_NAME not set. Skipping S3 storage.")
+    if not s3_client:
+        print("Error: S3 client not initialized. Cannot store weather data.")
+        return
+        
+    if not WEATHER_BUCKET:
+        print("Warning: WEATHER_BUCKET_NAME not set. Skipping S3 storage.")
         return
 
     try:
@@ -47,23 +54,22 @@ async def store_raw_weather_data(location: str, data: dict, is_forecast: bool = 
         data_type = "forecast" if is_forecast else "current"
         key = f"raw/weather/{data_type}/dt={date_partition}/location={safe_location}/{time_partition}.json"
         
-        # Run the blocking S3 call in a separate thread
-        loop = asyncio.get_running_loop()
-        await loop.run_in_executor(
-            None, # Use default thread pool
-            partial(
-                s3_client.put_object,
-                Bucket=WEATHER_BUCKET,
-                Key=key,
-                Body=json.dumps(data),
-                ContentType='application/json',
-                Metadata={
-                    'data-type': data_type,
-                    'location': safe_location
-                }
-            )
+        print(f"Attempting to store {data_type} weather data to s3://{WEATHER_BUCKET}/{key}")
+        
+        # Call S3 directly (blocking call is fine here as we are in an executor-like context in Lambda)
+        # Or better, just use the client directly to ensure it finishes.
+        s3_client.put_object(
+            Bucket=WEATHER_BUCKET,
+            Key=key,
+            Body=json.dumps(data),
+            ContentType='application/json',
+            Metadata={
+                'data-type': data_type,
+                'location': safe_location
+            }
         )
-        print(f"Successfully stored {data_type} weather data to s3://{WEATHER_BUCKET}/{key}")
+        
+        print(f"Successfully stored weather data to s3://{WEATHER_BUCKET}/{key}")
         
     except ClientError as e:
         print(f"Error storing data in S3: {e}")

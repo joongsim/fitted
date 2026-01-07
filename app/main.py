@@ -48,12 +48,16 @@ def debug_config():
         has_weather = False
         weather_preview = f"Error: {str(e)}"
     
+    from app.services import storage_service
     return {
         "weather_bucket_name": config.weather_bucket_name,
+        "storage_service_bucket": storage_service.WEATHER_BUCKET,
+        "storage_service_is_local": storage_service.IS_LOCAL,
         "has_openrouter_api_key": has_openrouter,
         "openrouter_key_preview": openrouter_preview,
         "has_weather_api_key": has_weather,
         "weather_key_preview": weather_preview,
+        "aws_execution_env": os.environ.get('AWS_EXECUTION_ENV'),
     }
 
 @app.post("/suggest-outfit")
