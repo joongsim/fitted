@@ -190,48 +190,72 @@ async def get_weather_with_forecast(location: str, days: int = 1) -> dict:
         print(f"⚠️ No API key found: {e}. Using mock data.")
         return await _get_mock_forecast_data(location, days)
     
-    # Fetch from API
-    async with httpx.AsyncClient() as client:
-        try:
-            response = await client.get(
-                f"{BASE_URL}/forecast.json",
-                params={
-                    "key": weather_api_key,
-                    "q": location,
-                    "days": days,
-                    "aqi": "no"
-                },
-                timeout=10.0
-            )
-            
-            response.raise_for_status()
-            data = response.json()
-            
-            # Validate with Pydantic
-            from app.models.weather import WeatherWithForecast
-            validated_data = WeatherWithForecast(**data)
-            
-            # Store in S3 (with forecast flag in key)
-            await store_raw_weather_data(
-                location, 
-                validated_data.model_dump(),
-                is_forecast=True
-            )
-            
-            # Cache the result
-            _weather_cache[cache_key] = (validated_data.model_dump(), time.time())
-            
-            return validated_data.model_dump()
-            
-        except httpx.HTTPStatusError as e:
-            print(f"API Error: {e}")
-            raise HTTPException(
-                status_code=e.response.status_code,
-                detail="Weather forecast service error"
-            )
-        except Exception as e:
-            print(f"Unexpected error: {e}")
-            raise HTTPException(status_code=503, detail="Service unavailable")
+    # Fetch from API with retries
+    headers = {
+        "User-Agent": "FittedWardrobe/1.0 (AWS Lambda; Python 3.13)",
+        "Accept": "application/json"
+    }
+    
+    async with httpx.AsyncClient(headers=headers) as client:
+        last_error = None
+        for attempt in range(3):
+            try:
+                response = await client.get(
+                    f"{BASE_URL}/forecast.json",
+                    params={
+                        "key": weather_api_key,
+                        "q": location,
+                        "days": days,
+                        "aqi": "no"
+                    },
+                    timeout=15.0
+                )
+                
+                # If we get a 502, 503, or 504, retry after a short delay
+                if response.status_code in [502, 503, 504] and attempt < 2:
+                    print(f"⚠️ WeatherAPI returned {response.status_code}. Retrying attempt {attempt + 1}...")
+                    import asyncio
+                    await asyncio.sleep(1 * (attempt + 1))
+                    continue
+                    
+                response.raise_for_status()
+                data = response.json()
+                
+                # Validate with Pydantic
+                from app.models.weather import WeatherWithForecast
+                validated_data = WeatherWithForecast(**data)
+                
+                # Store in S3 (with forecast flag in key)
+                # We wrap this in a try/except to ensure weather data is returned 
+                # even if S3 storage has a permission/config issue
+                try:
+                    await store_raw_weather_data(
+                        location, 
+                        validated_data.model_dump(),
+                        is_forecast=True
+                    )
+                except Exception as s3_err:
+                    print(f"Non-fatal error storing to S3: {s3_err}")
+                
+                # Cache the result
+                _weather_cache[cache_key] = (validated_data.model_dump(), time.time())
+                
+                return validated_data.model_dump()
+                
+            except httpx.HTTPStatusError as e:
+                last_error = e
+                print(f"API Error (Attempt {attempt + 1}): {e}")
+                if attempt == 2: # Last attempt
+                    raise HTTPException(
+                        status_code=e.response.status_code,
+                        detail=f"Weather forecast service error: {e.response.text}"
+                    )
+            except Exception as e:
+                last_error = e
+                print(f"Unexpected error (Attempt {attempt + 1}): {e}")
+                if attempt == 2:
+                    raise HTTPException(status_code=503, detail=f"Service unavailable: {str(e)}")
+
 
 async def _get_mock_forecast_data(location: str, days: int = 1) -> dict:
     """Mock forecast data for testing without API key"""
