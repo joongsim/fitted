@@ -133,3 +133,4 @@ dmypy.json
 
 # Personal documentation
 docs/personal/
+.cursor/*
