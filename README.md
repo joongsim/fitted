@@ -4,12 +4,15 @@ Welcome to the Fitted Wardrobe Assistant! This application provides personalized
 
 ## Overview
 
-This project uses a modern data stack to deliver a scalable and intelligent service:
+This project uses an enterprise-grade AI and data stack to deliver a scalable and intelligent service:
 
-- **FastAPI**: For the web application and API endpoints.
-- **Databricks**: As the central data platform for storing weather data and user preferences.
-- **dbt**: For transforming and modeling data within Databricks.
-- **Airflow**: To orchestrate data ingestion and processing pipelines.
-- **Large Language Model (LLM)**: Integrated via OpenRouter (using `openai/gpt-4o-mini`) to generate creative and relevant outfit suggestions.
+- **FastAPI**: For the web application and high-performance API endpoints.
+- **Databricks**: As the central Lakehouse platform for advanced analytics and ML storage.
+- **dbt**: For modular, version-controlled data transformations within Databricks.
+- **PyTorch**: For computer vision (clothing classification and feature extraction).
+- **Pinecone**: High-performance vector database for RAG-based personal wardrobe management.
+- **LangChain**: For agentic workflows, connecting LLMs to web search and vector retrieval.
+- **Airflow**: To orchestrate complex multi-stage data and AI pipelines.
+- **OpenRouter (LLM)**: Leveraging state-of-the-art models (like `gemini-3-flash`) for personalized styling.
 
-See `plan.md` for the detailed project plan and architecture.
+See `plan.md` for the full roadmap and architecture diagrams.
