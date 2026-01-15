@@ -60,7 +60,7 @@ oauthlib==3.3.1
 openai==2.8.0
 openpyxl==3.1.5
 orderly-set==5.5.0
-packaging==25.0
+packaging>=23.1,<25.0
 pandas==2.2.3
 parsedatetime==2.6
 pathspec==0.12.1
@@ -104,3 +104,13 @@ watchfiles==1.1.1
 websockets==15.0.1
 zipp==3.23.0
 reflex==0.6.8
+# AI & Data Stack Additions
+torch
+torchvision
+pinecone-client
+langchain
+langchain-community
+sentence-transformers
+duckduckgo-search
+mlflow
+databricks-sql-connector
