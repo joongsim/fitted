@@ -5,8 +5,11 @@ This document outlines the plan for creating a scalable, weather-based outfit su
 ## Technologies
 - **Backend:** Python (FastAPI) on AWS Lambda
 - **Data Platform:** Databricks (Delta Lake)
-- **Orchestration:** Apache Airflow (planned: EC2)
+- **Orchestration:** Apache Airflow
 - **Transformation:** dbt
+- **Vision & ML:** PyTorch (ResNet18), MLflow
+- **Vector Database:** Pinecone (Free Tier)
+- **AI Frameworks:** LangChain (Agents & RAG)
 - **Infrastructure:** AWS (Lambda, API Gateway, S3, CloudWatch)
 - **CI/CD:** AWS SAM/CloudFormation
 
@@ -14,42 +17,42 @@ This document outlines the plan for creating a scalable, weather-based outfit su
 
 ```mermaid
 graph TD
-    subgraph AWS Cloud - Current
+    subgraph AWS_Cloud_Current [AWS Cloud - Current]
         A[API Gateway] --> B[Lambda: FastAPI]
-        B --> S3[S3 Bucket<br/>Weather + Images]
+        B --> S3["S3 Bucket (Weather + Images)"]
         B --> CW[CloudWatch Logs]
         B --> LLM[OpenRouter API]
-        B --> ATH[Athena<br/>Weather Analytics]
+        B --> ATH["Athena (Weather Analytics)"]
         S3 --> ATH
     end
     
-    subgraph Future - Phase 2-3
-        DDB[(DynamoDB<br/>User Profiles)]
-        PG[(PostgreSQL + pgvector<br/>RAG & History)]
+    subgraph Future_Phase_2_3 [Future - Phase 2-3]
+        DDB[("DynamoDB (User Profiles)")]
+        PG[("PostgreSQL + pgvector (RAG & History)")]
     end
     
-    subgraph Monetization - Phase 3.5
-        PROD[(Product Catalog<br/>PostgreSQL)]
-        AFF[Affiliate Networks<br/>APIs]
-        TRACK[(Click Tracking<br/>DynamoDB)]
+    subgraph Monetization_Phase_3_5 [Monetization - Phase 3.5]
+        PROD[("Product Catalog (PostgreSQL)")]
+        AFF["Affiliate Networks (APIs)"]
+        TRACK[("Click Tracking (DynamoDB)")]
     end
     
-    subgraph Future - Phase 4
-        DB[(Databricks<br/>ML & Analytics)]
+    subgraph Future_Phase_4 [Future - Phase 4]
+        DB[("Databricks (ML & Analytics)")]
         AF[Airflow on EC2]
         DBT[dbt Models]
     end
     
     User --> A
-    B -.Phase 2.-> DDB
-    B -.Phase 3.-> PG
-    PG -.RAG vectors.-> PG
-    B -.Phase 3.5.-> PROD
-    PROD -.affiliate links.-> AFF
-    User -.clicks.-> TRACK
-    B -.Phase 4.-> DB
-    AF -.-> DB
-    DBT -.-> DB
+    B -. "Phase 2" .-> DDB
+    B -. "Phase 3" .-> PG
+    PG -. "RAG vectors" .-> PG
+    B -. "Phase 3.5" .-> PROD
+    PROD -. "affiliate links" .-> AFF
+    User -. "clicks" .-> TRACK
+    B -. "Phase 4" .-> DB
+    AF --> DB
+    DBT --> DB
     
     style A fill:#90EE90
     style B fill:#90EE90
@@ -59,43 +62,36 @@ graph TD
     style ATH fill:#90EE90
 ```
 
-## Target Architecture (Hybrid Multi-Database)
+## Target Architecture (Enterprise AI & Lakehouse)
 
 ```mermaid
 graph TD
-    subgraph User & Transactional Data
-        DDB[DynamoDB<br/>User Profiles & Preferences<br/>Sub-10ms reads]
-        PG[RDS PostgreSQL + pgvector<br/>User-Outfit History & RAG<br/>Vector similarity search]
+    subgraph User_Interface [User Interface]
+        USER[User] --> FRONT[Reflex Frontend]
+        FRONT --> API["FastAPI / AWS Lambda"]
     end
     
-    subgraph Analytics & Storage
-        S3[S3<br/>Weather JSON & Outfit Images<br/>Cost-effective storage]
-        ATH[Athena<br/>Weather Analytics<br/>SQL on S3]
-        DBX[Databricks<br/>Advanced Analytics & ML]
+    subgraph Data_Lakehouse [Databricks Lakehouse]
+        S3[S3 Bronze] --> DBX[Databricks Delta Lake]
+        DBX <--> DBT[dbt Transformations]
+        DBX --> MLF[MLflow Model Tracking]
     end
     
-    USER[User Request] --> API[API Gateway/Lambda]
-    API --> DDB
-    API --> PG
+    subgraph AI_Vision_Layer [AI & Vision Layer]
+        API --> PV[PyTorch Vision Service]
+        PV --> MLF
+        API --> PINE[("Pinecone Vector DB")]
+        PINE -. "RAG" .-> API
+    end
+    
+    subgraph Agentic_Stylist [Agentic Stylist]
+        API --> LLM[OpenRouter LLM]
+        LLM --> LC[LangChain Agent]
+        LC --> DDG[DuckDuckGo Search]
+    end
+
     API --> S3
-    DDB -.profile lookup.-> PG
-    PG -.vector search.-> PG
-    PG -.product matching.-> PG
-    S3 --> ATH
-    S3 -.future.-> DBX
-    PG -.ML training.-> DBX
-    
-    API --> LLM[OpenRouter<br/>GPT-4o-mini]
-    
-    subgraph Affiliate System
-        PROD[Product Catalog<br/>PostgreSQL]
-        CLICK[Click Tracking<br/>DynamoDB]
-        AFF[Affiliate Networks]
-    end
-    
-    PG --> PROD
-    USER -.clicks product.-> CLICK
-    PROD -.links.-> AFF
+    DBX -. "Fashion Context" .-> LLM
 ```
 
 ## Progress Tracker
@@ -155,24 +151,15 @@ graph TD
 **Status:** Basic front end implemented using Reflex, connected to AWS Lambda API.
 **URL:** (Local development) http://localhost:3000
 
-### 📅 Week 4: Airflow Orchestration
-- [ ] Launch EC2 t3.micro instance
-- [ ] Install and configure Airflow
-- [ ] Create weather data ingestion DAG
-- [ ] Implement scheduled weather fetching
-- [ ] Configure Airflow → S3 → Databricks pipeline
-- [ ] Set up monitoring and alerting
-- [ ] Document Airflow workflows
-
-### 📅 Week 5: dbt Transformations & Databricks
-- [ ] Set up Databricks Community Edition
-- [ ] Configure dbt for Databricks
-- [ ] Create Delta Lake tables (Bronze/Silver/Gold)
-- [ ] Develop dbt models for weather transformations
-- [ ] Implement data quality tests
-- [ ] Create outfit recommendation logic in SQL
-- [ ] Automate dbt runs from Airflow
-- [ ] Build analytics dashboard
+### 📅 Week 4-5: Enterprise AI, Databricks & dbt (IN PROGRESS)
+- [ ] Implement PyTorch vision service for clothing classification
+- [ ] Integrate MLflow for model tracking on Databricks
+- [ ] Create dbt models for weather-to-fashion context (Bronze -> Silver -> Gold)
+- [ ] Set up Pinecone vector store for RAG wardrobe management
+- [ ] Implement LangChain agent for online retail search
+- [ ] Update Airflow DAGs to orchestrate full AI pipeline
+- [ ] Connect FastAPI to Databricks via SQL Connector
+- [ ] Build "Smart Wardrobe" endpoints in FastAPI
 
 ### 📅 Week 6-8: User Profiles & Authentication
 - [ ] Set up DynamoDB tables for users and preferences
