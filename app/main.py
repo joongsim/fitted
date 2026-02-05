@@ -105,8 +105,8 @@ async def suggest_outfit(
         )
 
         return {
-            "location": location,
             "weather": {
+                "location": weather_data.get("location", {}),
                 "current": {
                     "temp_c": temp_c,
                     "temp_f": weather_data["current"]["temp_f"],
