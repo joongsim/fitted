@@ -4,6 +4,7 @@ This document outlines the plan for creating a scalable, weather-based outfit su
 
 ## Technologies
 - **Backend:** Python (FastAPI) on AWS Lambda
+- **Frontend:** FastHTML (Python, HTMX-powered)
 - **Data Platform:** Databricks (Delta Lake)
 - **Orchestration:** Apache Airflow
 - **Transformation:** dbt
@@ -67,7 +68,7 @@ graph TD
 ```mermaid
 graph TD
     subgraph User_Interface [User Interface]
-        USER[User] --> FRONT[Reflex Frontend]
+        USER[User] --> FRONT[FastHTML Frontend]
         FRONT --> API["FastAPI / AWS Lambda"]
     end
     
@@ -142,14 +143,14 @@ graph TD
 **New Endpoints:** `/weather/{location}`, `/weather/{location}/forecast`, `/suggest-outfit` (with forecast support)
 
 ### ✅ Week 3.5: Basic Front End Implementation (COMPLETE)
-- [x] Set up Reflex project structure
+- [x] Set up FastHTML project structure
 - [x] Create responsive UI for outfit suggestions
 - [x] Integrate with FastAPI backend
 - [x] Add location search and detailed weather metrics grid
 - [x] Remove 3-day forecast as per design update
 
-**Status:** Basic front end implemented using Reflex, connected to AWS Lambda API.
-**URL:** (Local development) http://localhost:3000
+**Status:** Basic front end implemented using FastHTML (HTMX-powered), connected to AWS Lambda API.
+**URL:** (Local development) http://localhost:5001
 
 ### 📅 Week 4-5: Enterprise AI, Databricks & dbt (IN PROGRESS)
 - [ ] Implement PyTorch vision service for clothing classification

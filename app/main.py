@@ -2,6 +2,7 @@
 from datetime import datetime
 from typing import Optional
 import boto3
+import os
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from mangum import Mangum
@@ -75,7 +76,7 @@ async def suggest_outfit(
     try:
         # Get weather data (with or without forecast)
         if include_forecast:
-            weather_data = await weather_service.get_weather_with_forecast(location, days=3)
+            weather_data = await weather_service.get_weather_with_forecast(location, days=1)
             forecast = weather_data.get("forecast", {}).get("forecastday", [])
             formatted_forecast = [
                 {
