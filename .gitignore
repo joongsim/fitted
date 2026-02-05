@@ -134,3 +134,5 @@ dmypy.json
 # Personal documentation
 docs/personal/
 .cursor/*
+
+frontend/.sesskey
