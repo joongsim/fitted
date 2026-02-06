@@ -278,12 +278,14 @@ def outfit_item(label: str, value: str) -> Div:
 def weather_results(location: str, weather: dict, outfit: dict) -> Div:
     """Render weather and outfit results."""
     temp_f = weather.get("temp_f", "")
+    low_f = forecast.get("low_f", "")
+    high_f = forecast.get("high_f", "")
     condition = weather.get("condition", "")
     humidity = weather.get("humidity", "")
     wind_kph = weather.get("wind_kph", "")
     feelslike_f = weather.get("feelslike_f", "")
     uv = weather.get("uv", "")
-
+    
     outfit_top = outfit.get("top", "None") if isinstance(outfit, dict) else str(outfit)
     outfit_bottom = outfit.get("bottom", "None") if isinstance(outfit, dict) else ""
     outfit_outerwear = (
@@ -309,13 +311,13 @@ def weather_results(location: str, weather: dict, outfit: dict) -> Div:
         Div(
             Div(
                 Div(
+                    Div(location, cls="location-name"),
                     Div(f"{temp_f}°F", cls="weather-temp"),
                     Div(condition, cls="weather-condition"),
                 ),
-                Div(
-                    Div(location, cls="location-name"),
-                    cls="weather-location",
-                ),
+                # Div(
+
+                # ),
                 cls="weather-main",
                 style="margin-bottom: 1.5rem",
             ),
@@ -444,7 +446,10 @@ async def get_outfit(location: str):
             forecast = weather_data.get("forecast", {})
             outfit = data.get("outfit_suggestion", {})
 
-            display_location = format_location(location_info, location)
+            # display_location = format_location(location_info, location)
+            display_location = location_info.get("name", "")
+            display_location += ", " + location_info.get("region", "")
+            # display_location += ", " + location_info.get("country", "")
 
             return weather_results(display_location, weather, outfit)
 

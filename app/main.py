@@ -83,6 +83,8 @@ async def suggest_outfit(
                     "date": day["date"],
                     "min_temp_c": day["day"]["mintemp_c"],
                     "max_temp_c": day["day"]["maxtemp_c"],
+                    "min_temp_f": day["day"]["mintemp_f"],
+                    "max_temp_f": day["day"]["maxtemp_f"],
                     "condition": day["day"]["condition"]["text"],
                     "chance_of_rain": day["day"].get("daily_chance_of_rain", 0)
                 }
@@ -113,7 +115,7 @@ async def suggest_outfit(
                     "condition": condition,
                     "humidity": weather_data["current"]["humidity"],
                     "wind_kph": weather_data["current"]["wind_kph"],
-                    "feelslike_c": weather_data["current"]["feelslike_c"],
+                    "feelslike_f": weather_data["current"]["feelslike_f"],
                     "uv": weather_data["current"]["uv"]
                 },
                 "forecast": formatted_forecast if include_forecast else None
