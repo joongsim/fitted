@@ -275,11 +275,11 @@ def outfit_item(label: str, value: str) -> Div:
     )
 
 
-def weather_results(location: str, weather: dict, outfit: dict) -> Div:
+def weather_results(location: str, weather: dict, forecast: dict, outfit: dict) -> Div:
     """Render weather and outfit results."""
     temp_f = weather.get("temp_f", "")
-    low_f = forecast.get("low_f", "")
-    high_f = forecast.get("high_f", "")
+    min_temp_f = forecast.get("min_temp_f", "")
+    max_temp_f = forecast.get("max_temp_f", "")
     condition = weather.get("condition", "")
     humidity = weather.get("humidity", "")
     wind_kph = weather.get("wind_kph", "")
@@ -314,6 +314,8 @@ def weather_results(location: str, weather: dict, outfit: dict) -> Div:
                     Div(location, cls="location-name"),
                     Div(f"{temp_f}°F", cls="weather-temp"),
                     Div(condition, cls="weather-condition"),
+                    Div(f"Low: {min_temp_f}°F", cls="weather-low"),
+                    Div(f"High: {max_temp_f}°F", cls="weather-high"),
                 ),
                 # Div(
 
@@ -451,7 +453,7 @@ async def get_outfit(location: str):
             display_location += ", " + location_info.get("region", "")
             # display_location += ", " + location_info.get("country", "")
 
-            return weather_results(display_location, weather, outfit)
+            return weather_results(display_location, weather, forecast, outfit)
 
     except httpx.TimeoutException:
         return error_message("Request timed out. Please try again.")
