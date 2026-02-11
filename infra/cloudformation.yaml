@@ -1,0 +1,361 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  Fitted EC2 + RDS infrastructure.
+  VPC with IPv6, public subnet (EC2), private subnets (RDS in 2 AZs),
+  Caddy/Python installed via UserData.
+
+# ---------------------------------------------------------------------------
+# Parameters
+# ---------------------------------------------------------------------------
+Parameters:
+  SSHKeyName:
+    Type: String
+    Description: EC2 key pair name created in Phase 0A
+
+  SSHAllowedIPv6:
+    Type: String
+    Description: >-
+      Your public IPv6 address in CIDR notation (e.g. 2001:db8::1/128).
+      Find yours with: curl -6 -s ifconfig.me
+    AllowedPattern: '^([0-9a-fA-F:]+)/(\d+)$'
+    ConstraintDescription: Must be a valid IPv6 CIDR (e.g. 2001:db8::1/128)
+
+  WeatherBucketName:
+    Type: String
+    Description: >-
+      Existing S3 bucket name from the SAM stack (fitted-wardrobe-dev).
+      Look up with: aws cloudformation describe-stacks --stack-name fitted-wardrobe-dev
+      --query "Stacks[0].Outputs[?OutputKey=='WeatherBucket'].OutputValue" --output text
+
+  LatestAmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64
+    Description: Amazon Linux 2023 ARM64 AMI (auto-resolved from SSM)
+
+# ---------------------------------------------------------------------------
+# Resources
+# ---------------------------------------------------------------------------
+Resources:
+
+  # -------------------------------------------------------------------------
+  # VPC + IPv6
+  # -------------------------------------------------------------------------
+  FittedVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: fitted-vpc
+
+  # Request an Amazon-provided /56 IPv6 CIDR block for the VPC.
+  # Using a separate resource (instead of the VPC property) gives CloudFormation
+  # an explicit dependency edge so subnets wait for the block to be assigned.
+  VPCIpv6CidrBlock:
+    Type: AWS::EC2::VPCCidrBlock
+    Properties:
+      VpcId: !Ref FittedVPC
+      AmazonProvidedIpv6CidrBlock: true
+
+  # -------------------------------------------------------------------------
+  # Subnets
+  # -------------------------------------------------------------------------
+
+  # Public subnet (us-west-1a) — EC2 lives here, IPv6 enabled
+  PublicSubnetA:
+    Type: AWS::EC2::Subnet
+    DependsOn: VPCIpv6CidrBlock
+    Properties:
+      VpcId: !Ref FittedVPC
+      CidrBlock: 10.0.1.0/24
+      AvailabilityZone: !Select [0, !GetAZs '']
+      AssignIpv6AddressOnCreation: true
+      Ipv6CidrBlock: !Select
+        - 0
+        - !Cidr
+          - !Select [0, !GetAtt FittedVPC.Ipv6CidrBlocks]
+          - 256
+          - 64
+      Tags:
+        - Key: Name
+          Value: fitted-public-a
+
+  # Private subnet A (us-west-1a) — RDS primary, IPv4-only
+  PrivateSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref FittedVPC
+      CidrBlock: 10.0.10.0/24
+      AvailabilityZone: !Select [0, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: fitted-private-a
+
+  # Private subnet B (us-west-1b) — RDS standby AZ, IPv4-only
+  PrivateSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref FittedVPC
+      CidrBlock: 10.0.11.0/24
+      AvailabilityZone: !Select [1, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: fitted-private-b
+
+  # -------------------------------------------------------------------------
+  # Internet Gateway
+  # -------------------------------------------------------------------------
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: fitted-igw
+
+  VPCGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref FittedVPC
+      InternetGatewayId: !Ref InternetGateway
+
+  # -------------------------------------------------------------------------
+  # Route Table (public)
+  # -------------------------------------------------------------------------
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref FittedVPC
+      Tags:
+        - Key: Name
+          Value: fitted-public-rt
+
+  PublicRouteIPv4:
+    Type: AWS::EC2::Route
+    DependsOn: VPCGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicRouteIPv6:
+    Type: AWS::EC2::Route
+    DependsOn: VPCGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationIpv6CidrBlock: ::/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnetA
+      RouteTableId: !Ref PublicRouteTable
+
+  # -------------------------------------------------------------------------
+  # Security Groups
+  # -------------------------------------------------------------------------
+
+  # EC2: SSH from your IPv6, HTTP/HTTPS from all IPv6
+  EC2SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Fitted EC2 instance security group
+      VpcId: !Ref FittedVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIpv6: !Ref SSHAllowedIPv6
+          Description: SSH from allowed IPv6 address
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIpv6: ::/0
+          Description: HTTP from all IPv6
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIpv6: ::/0
+          Description: HTTPS from all IPv6
+      Tags:
+        - Key: Name
+          Value: fitted-ec2-sg
+
+  # RDS: PostgreSQL from EC2 only (internal VPC IPv4)
+  RDSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Fitted RDS instance security group
+      VpcId: !Ref FittedVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref EC2SecurityGroup
+          Description: PostgreSQL from EC2 security group only
+      Tags:
+        - Key: Name
+          Value: fitted-rds-sg
+
+  # -------------------------------------------------------------------------
+  # IAM Role + Instance Profile for EC2
+  # -------------------------------------------------------------------------
+  EC2Role:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: fitted-ec2-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: fitted-ec2-s3-access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # S3 object operations on the existing weather/wardrobe bucket
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                Resource: !Sub 'arn:aws:s3:::${WeatherBucketName}/*'
+              # S3 bucket-level operations (ListBucket)
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                Resource: !Sub 'arn:aws:s3:::${WeatherBucketName}'
+              # SSM Parameter Store read access for /fitted/* secrets
+              - Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                Resource: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/fitted/*'
+
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref EC2Role
+
+  # -------------------------------------------------------------------------
+  # EC2 Instance (t4g.micro — free tier 12 months)
+  # -------------------------------------------------------------------------
+  EC2Instance:
+    Type: AWS::EC2::Instance
+    DependsOn: VPCGatewayAttachment
+    Properties:
+      InstanceType: t4g.micro
+      ImageId: !Ref LatestAmiId
+      KeyName: !Ref SSHKeyName
+      SubnetId: !Ref PublicSubnetA
+      SecurityGroupIds:
+        - !Ref EC2SecurityGroup
+      IamInstanceProfile: !Ref EC2InstanceProfile
+      Ipv6AddressCount: 1
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeSize: 20
+            VolumeType: gp3
+            Encrypted: true
+      Tags:
+        - Key: Name
+          Value: fitted-ec2
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -euxo pipefail
+          exec > /var/log/userdata.log 2>&1
+
+          echo "=== Starting UserData ==="
+
+          # System update
+          dnf update -y
+
+          # Python 3.11, git, PostgreSQL client
+          dnf install -y python3.11 python3.11-pip git postgresql15
+
+          # Caddy reverse proxy (via COPR, not in AL2023 default repos)
+          dnf install -y 'dnf-command(copr)'
+          dnf copr enable -y @caddy/caddy
+          dnf install -y caddy
+
+          # Verify installations
+          python3.11 --version
+          caddy version
+          psql --version
+          git --version
+
+          echo "=== UserData complete ==="
+
+  # -------------------------------------------------------------------------
+  # RDS PostgreSQL 16 (db.t4g.micro — free tier 12 months)
+  # -------------------------------------------------------------------------
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Fitted RDS subnet group spanning 2 AZs
+      SubnetIds:
+        - !Ref PrivateSubnetA
+        - !Ref PrivateSubnetB
+      Tags:
+        - Key: Name
+          Value: fitted-db-subnet-group
+
+  FittedDB:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Snapshot
+    UpdateReplacePolicy: Snapshot
+    Properties:
+      DBInstanceClass: db.t4g.micro
+      Engine: postgres
+      EngineVersion: '16'
+      AllocatedStorage: 20
+      StorageType: gp3
+      DBName: fitted
+      MasterUsername: fitted_admin
+      MasterUserPassword: '{{resolve:ssm-secure:/fitted/db-password}}'
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      VPCSecurityGroups:
+        - !Ref RDSSecurityGroup
+      PubliclyAccessible: false
+      BackupRetentionPeriod: 7
+      Tags:
+        - Key: Name
+          Value: fitted-db
+
+# ---------------------------------------------------------------------------
+# Outputs
+# ---------------------------------------------------------------------------
+Outputs:
+  EC2InstanceId:
+    Description: EC2 instance ID
+    Value: !Ref EC2Instance
+
+  EC2IPv6Lookup:
+    Description: >-
+      Run this to get the IPv6 address:
+      aws ec2 describe-instances --instance-ids <InstanceId>
+      --query "Reservations[0].Instances[0].Ipv6Address" --output text --region us-west-1
+    Value: !Ref EC2Instance
+
+  RDSEndpoint:
+    Description: RDS PostgreSQL endpoint hostname (for DATABASE_URL)
+    Value: !GetAtt FittedDB.Endpoint.Address
+
+  RDSPort:
+    Description: RDS PostgreSQL port
+    Value: !GetAtt FittedDB.Endpoint.Port
+
+  VPCID:
+    Description: VPC ID
+    Value: !Ref FittedVPC
+
+  WeatherBucketName:
+    Description: S3 bucket name (passed through for reference)
+    Value: !Ref WeatherBucketName
