@@ -4,6 +4,7 @@
 from fasthtml.common import *  # noqa: F403, F405 star import ok for fasthtml
 import httpx
 import os
+from mangum import Mangum
 
 # API Configuration
 API_BASE_URL = os.environ.get(
@@ -477,6 +478,10 @@ async def get_outfit(location: str):
         return error_message("Request timed out. Please try again.")
     except Exception as e:
         return error_message(f"Connection error: {str(e)}")
+
+
+# Lambda handler for AWS deployment
+handler = Mangum(app)
 
 
 if __name__ == "__main__":
