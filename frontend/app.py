@@ -2,14 +2,26 @@
 
 # ruff: noqa: F405
 from fasthtml.common import *  # noqa: F403, F405 star import ok for fasthtml
+import boto3
 import httpx
-import os
 from mangum import Mangum
 
 # API Configuration
 API_BASE_URL = os.environ.get(
     "API_BASE_URL", "https://dtv7713h25.execute-api.us-west-1.amazonaws.com"
 )
+
+def get_ssm_parameter(name, default=None):
+    """Fetch parameter from SSM Parameter Store (for Lambda) or return default."""
+    if os.environ.get("AWS_EXECUTION_ENV"):
+        try:
+            ssm = boto3.client("ssm")
+            response = ssm.get_parameter(Name=name, WithDecryption=True)
+            return response["Parameter"]["Value"]
+        except Exception as e:
+            print(f"Error fetching SSM parameter {name}: {e}")
+            return default
+    return default
 
 # Custom CSS for light theme styling (green palette)
 custom_css = Style("""
@@ -256,7 +268,7 @@ custom_css = Style("""
 
 # Get session secret from environment or generate a random one for local use
 # In Lambda, we MUST provide this to prevent writing .sesskey to the read-only filesystem
-SESSION_SECRET = os.environ.get("SESSION_SECRET", "local-dev-secret-key-change-in-prod")
+SESSION_SECRET = get_ssm_parameter("/fitted/session-secret", os.environ.get("SESSION_SECRET", "local-dev-secret-key-change-in-prod"))
 
 app = FastHTMLWithLiveReload(
     secret_key=SESSION_SECRET,

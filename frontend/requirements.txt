@@ -2,3 +2,4 @@ python-fasthtml>=0.12.0
 httpx
 uvicorn
 mangum
+boto3
