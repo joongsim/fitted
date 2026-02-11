@@ -11,6 +11,41 @@ Globals:
       - x86_64
 
 Resources:
+  # Frontend API Gateway
+  FrontendApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: $default
+      Description: API Gateway for Fitted Frontend
+
+  # Frontend Lambda Function
+  FittedFrontend:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: makefile
+    Properties:
+      FunctionName: !Sub 'fitted-wardrobe-frontend-${AWS::StackName}'
+      CodeUri: frontend/
+      Handler: app.handler
+      Description: Fitted Wardrobe Frontend (FastHTML)
+      Environment:
+        Variables:
+          API_BASE_URL: !Sub 'https://${ServerlessHttpApi}.execute-api.${AWS::Region}.amazonaws.com/'
+      Events:
+        RootPath:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref FrontendApi
+            Path: /
+            Method: GET
+        CatchAll:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref FrontendApi
+            Path: /{proxy+}
+            Method: ANY
+
+  # Backend API Function
   FittedApi:
     Type: AWS::Serverless::Function
     Metadata:
@@ -156,8 +191,12 @@ Resources:
 
 Outputs:
   ApiUrl:
-    Description: URL of the HTTP API
+    Description: URL of the Backend API
     Value: !Sub 'https://${ServerlessHttpApi}.execute-api.${AWS::Region}.amazonaws.com/'
+
+  FrontendUrl:
+    Description: URL of the Frontend
+    Value: !Sub 'https://${FrontendApi}.execute-api.${AWS::Region}.amazonaws.com/'
   
   FunctionArn:
     Description: ARN of the Lambda function
