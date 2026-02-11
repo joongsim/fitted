@@ -102,7 +102,14 @@ custom_css = Style("""
         margin-bottom: 1rem;
         box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
     }
-    
+        
+    .retro-card {
+        background-color: #ffffff;
+        border: 2px solid #000000;
+        border-radius: 0;
+        color: #16a34a;
+        box-shadow: none;
+    }
     .weather-main {
         display: flex;
         justify-content: space-between;
@@ -133,17 +140,17 @@ custom_css = Style("""
     }
     
     .weather-location .location-label {
-        color: var(--pico-muted-color);
+        color: #000000;
         font-size: 0.875rem;
     }
     
-    .retro-card {
-        background-color: #ffffff;
-        border: 2px solid #000000;
-        border-radius: 0;
-        color: #16a34a;
-        box-shadow: none;
+    .weather-high-low {
+        display: flex;
+        gap: 1rem;
+        margin-top: 0.5rem;
+        color: #000000;
     }
+
 
 /* Clean up existing classes (remove colors/borders so they use the shared class) */
     .weather-card {
@@ -153,17 +160,21 @@ custom_css = Style("""
     }
 
     .metric-card {
-        padding: 1rem;
+        padding: 0.5rem 1rem;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
         /* Background and border are now handled by .retro-card */
     }
 
     /* Update text elements to inherit the green color from the card */
     .weather-temp, 
-    .weather-condition, 
-    .weather-location .location-label,
+    .weather-condition {
+        color: inherit; /* This ensures they all become green */
+    }
     .metric-label,
     .metric-value {
-        color: inherit; /* This ensures they all become green */
+        color: #000000;
     }
     .metrics-grid {
         display: grid;
@@ -178,12 +189,14 @@ custom_css = Style("""
         gap: 0.5rem;
         font-size: 0.875rem;
         color: rgb(0, 0, 0);
-        margin-bottom: 0.25rem;
+        margin-bottom: 0;
+        white-space: nowrap;
     }
     
     .metric-value {
-        font-size: 1.25rem;
+        font-size: 1rem;
         font-weight: bold;
+        margin-left: auto;
     }
     
     .outfit-section h2 {
@@ -192,7 +205,7 @@ custom_css = Style("""
     }
     
     .outfit-item {
-        background-color: #f0fdf4;
+        background-color: #ffffff;
         border-radius: 0;
         padding: 1rem;
         margin-bottom: 0.75rem;
@@ -260,7 +273,7 @@ def metric_card(label: str, value: str, icon: str) -> Div:
         "sun": "☀️",
     }
     return Div(
-        Div(Span(icons.get(icon, "📊")), Span(label), cls="metric-label"),
+        Div(Span(icons.get(icon, "📊")), Span(f"{label}:"), cls="metric-label"),
         Div(value, cls="metric-value"),
         cls="metric-card retro-card",
     )
@@ -271,7 +284,7 @@ def outfit_item(label: str, value: str) -> Div:
     return Div(
         Div(label, cls="outfit-item-label"),
         Div(value, cls="outfit-item-value"),
-        cls="outfit-item",
+        cls="outfit-item retro-card",
     )
 
 
@@ -323,18 +336,21 @@ def weather_results(location: str, weather: dict, forecast: dict, outfit: dict) 
                 cls="weather-main",
                 style="margin-bottom: 1.5rem",
             ),
-            # Metrics Grid inside the card
-            Div(
-                metric_card("Feels Like", f"{feelslike_f}°F", "thermometer"),
-                metric_card("Humidity", f"{humidity}%", "droplets"),
-                metric_card("Wind", f"{wind_kph} kph", "wind"),
-                metric_card("UV Index", str(uv), "sun"),
-                cls="metrics-grid",
+            # Metrics List inside the card
+            Details(
+                Summary("Weather Details"),
+                Div(
+                    metric_card("Feels Like", f"{feelslike_f}°F", "thermometer"),
+                    metric_card("Humidity", f"{humidity}%", "droplets"),
+                    metric_card("Wind", f"{wind_kph} kph", "wind"),
+                    metric_card("UV Index", str(uv), "sun"),
+                    cls="metrics-list",
+                ),
             ),
             cls="weather-card retro-card",
         ),
         # Outfit Section
-        Div(H2("Stylist Recommendation"), *outfit_items, cls="outfit-section"),
+        Div(*outfit_items, cls="outfit-section"),
         id="results",
     )
 
@@ -402,12 +418,15 @@ def home():
 def format_location(location_data: dict, fallback: str) -> str:
     """Format location with proper capitalization and state/region."""
     if location_data:
-        name = location_data.get("name", "")
-        region = location_data.get("region", "")
-        if name and region:
-            return f"{name}, {region}"
-        elif name:
-            return name
+        parts = [
+            location_data.get("name"),
+            location_data.get("region"),
+            location_data.get("country")
+        ]
+        # Filter out None or empty strings and join
+        location_str = ", ".join(part for part in parts if part)
+        if location_str:
+            return location_str
     # Fallback: title case the user input
     return fallback.title()
 
@@ -445,13 +464,12 @@ async def get_outfit(location: str):
             weather_data = data.get("weather", {})
             location_info = weather_data.get("location", {})
             weather = weather_data.get("current", {})
-            forecast = weather_data.get("forecast", {})
+            forecast = weather_data.get("forecast")[0]
+            print(forecast)
+            print(weather)
             outfit = data.get("outfit_suggestion", {})
 
-            # display_location = format_location(location_info, location)
-            display_location = location_info.get("name", "")
-            display_location += ", " + location_info.get("region", "")
-            # display_location += ", " + location_info.get("country", "")
+            display_location = format_location(location_info, location)
 
             return weather_results(display_location, weather, forecast, outfit)
 
