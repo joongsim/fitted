@@ -481,7 +481,8 @@ async def get_outfit(location: str):
 
 
 # Lambda handler for AWS deployment
-handler = Mangum(app)
+# Disable lifespan to avoid startup/shutdown timeouts in Lambda
+handler = Mangum(app, lifespan="off")
 
 
 if __name__ == "__main__":
