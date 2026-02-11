@@ -254,7 +254,12 @@ custom_css = Style("""
     }
 """)
 
+# Get session secret from environment or generate a random one for local use
+# In Lambda, we MUST provide this to prevent writing .sesskey to the read-only filesystem
+SESSION_SECRET = os.environ.get("SESSION_SECRET", "local-dev-secret-key-change-in-prod")
+
 app = FastHTMLWithLiveReload(
+    secret_key=SESSION_SECRET,
     hdrs=(
         Link(
             rel="stylesheet",
