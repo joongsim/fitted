@@ -28,6 +28,7 @@ Resources:
       CodeUri: frontend/
       Handler: app.handler
       Description: Fitted Wardrobe Frontend (FastHTML)
+      Role: !GetAtt FittedApiRole.Arn
       Environment:
         Variables:
           API_BASE_URL: !Sub 'https://${ServerlessHttpApi}.execute-api.${AWS::Region}.amazonaws.com/'
