@@ -36,7 +36,7 @@ def debug_config():
     try:
         openrouter_key = config.openrouter_api_key
         has_openrouter = bool(openrouter_key)
-        openrouter_preview = f"{openrouter_key[:10]}..." if openrouter_key else None
+        openrouter_preview = "OpenRouter API Key exists" if openrouter_key else None
     except Exception as e:
         has_openrouter = False
         openrouter_preview = f"Error: {str(e)}"
@@ -44,7 +44,7 @@ def debug_config():
     try:
         weather_key = config.weather_api_key
         has_weather = bool(weather_key)
-        weather_preview = f"{weather_key[:10]}..." if weather_key else None
+        weather_preview = "Weather API Key exists" if weather_key else None
     except Exception as e:
         has_weather = False
         weather_preview = f"Error: {str(e)}"

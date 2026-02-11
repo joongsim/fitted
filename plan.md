@@ -11,8 +11,8 @@ This document outlines the plan for creating a scalable, weather-based outfit su
 - **Vision & ML:** PyTorch (ResNet18), MLflow
 - **Vector Database:** Pinecone (Free Tier)
 - **AI Frameworks:** LangChain (Agents & RAG)
-- **Infrastructure:** AWS (Lambda, API Gateway, S3, CloudWatch)
-- **CI/CD:** AWS SAM/CloudFormation
+- **Infrastructure:** AWS (EC2, RDS PostgreSQL, S3, Lambda legacy), Caddy reverse proxy
+- **CI/CD:** AWS SAM/CloudFormation, GitHub Actions
 
 ## Current Architecture (Week 1-2 Complete)
 
@@ -152,7 +152,22 @@ graph TD
 **Status:** Basic front end implemented using FastHTML (HTMX-powered), connected to AWS Lambda API.
 **URL:** (Local development) http://localhost:5001
 
-### 📅 Week 4-5: Enterprise AI, Databricks & dbt (IN PROGRESS)
+### 📅 Week 4: EC2 + RDS Migration & Photo Upload (IN PROGRESS)
+
+Migrate from Lambda to EC2 with RDS PostgreSQL. Add wardrobe photo upload. See [Week 4 detailed plan](.cursor/plans/week_4_ec2_rds_plan_90a4b00c.plan.md).
+
+- [ ] **Phase 0:** Create SSH key pair, store DB password in SSM
+- [ ] **Phase 1:** CloudFormation -- VPC, subnets (2 AZs), EC2 t4g.micro, Elastic IP, RDS db.t4g.micro (PostgreSQL 16 + pgvector, gp3), security groups, IAM (incl. s3:DeleteObject)
+- [ ] **Phase 2:** Database schema (wardrobe_items table, HNSW index, updated_at trigger), psycopg async connection pool, `requirements-ec2.txt` (incl. python-fasthtml)
+- [ ] **Phase 3:** EC2 deployment -- setup_ec2.sh (Caddy via COPR, .env with chmod 600), systemd services (Wants= dependency), Caddyfile (handle_path), config.py USE_SSM support, FastHTML production mode, gate /debug/config behind ENABLE_DEBUG, update pyproject.toml requires-python to >=3.11
+- [ ] **Phase 4:** Wardrobe API -- Pydantic models, CRUD service, S3 image upload/presign/delete, /wardrobe/* endpoints
+- [ ] **Phase 4T:** Tests -- conftest.py (psycopg3 cursor mocks, moto S3), wardrobe service/API/storage tests
+- [ ] **Phase 5:** Frontend wardrobe UI -- nav bar, upload form, gallery grid, HTMX delete
+- [ ] **Phase 6:** Deploy script, optional GitHub Actions for EC2
+
+**Cost:** ~$3.60/month during free tier (public IPv4), ~$22/month after free tier expires
+
+### 📅 Week 5+: Enterprise AI, Databricks & dbt (FUTURE)
 - [ ] Implement PyTorch vision service for clothing classification
 - [ ] Integrate MLflow for model tracking on Databricks
 - [ ] Create dbt models for weather-to-fashion context (Bronze -> Silver -> Gold)
@@ -639,19 +654,20 @@ async def get_outfit_suggestion_enhanced(
 
 ---
 
-### Next Steps After Week 2
+### Next Steps
 
-**Week 3 Preview:**
-- EC2 Airflow setup
-- Scheduled batch processing
-- Airflow → S3 → Databricks pipeline
-- Automated data quality checks
+**Week 4 (Current):**
+- EC2 + RDS PostgreSQL migration (replace Lambda for backend + frontend)
+- Wardrobe photo upload with S3 storage and pgvector-ready schema
+- Caddy reverse proxy, systemd services, CloudFormation infrastructure
+- See [Week 4 detailed plan](.cursor/plans/week_4_ec2_rds_plan_90a4b00c.plan.md)
 
 **Long-term Vision:**
-- Machine learning for outfit recommendations
+- Machine learning for outfit recommendations (PyTorch, MLflow)
 - User preference learning
-- Historical trend analysis
+- Historical trend analysis (dbt, Airflow)
 - Predictive outfit suggestions
+- Affiliate monetization
 
 ---
 
@@ -822,9 +838,11 @@ LIMIT 10;
 ### Implementation Timeline
 
 - **Weeks 1-2:** Weather analytics with Athena ✅ (COMPLETE)
-- **Weeks 3-5:** Enhanced features & validation 🔄 (IN PROGRESS)
+- **Week 3-3.5:** Enhanced features, validation & frontend ✅ (COMPLETE)
+- **Week 4:** EC2 + RDS migration, wardrobe photo upload 🔄 (IN PROGRESS)
+- **Week 5+:** PyTorch vision, embeddings, dbt, Airflow
 - **Weeks 6-8:** User profiles with DynamoDB
-- **Weeks 9-12:** RAG with PostgreSQL + pgvector
+- **Weeks 9-12:** RAG with PostgreSQL + pgvector (already set up in Week 4)
 - **Weeks 13-16:** Affiliate monetization
 - **Month 4+:** Databricks ML integration
 
