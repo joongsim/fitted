@@ -8,7 +8,7 @@ from mangum import Mangum
 
 # API Configuration
 API_BASE_URL = os.environ.get(
-    "API_BASE_URL", "https://dtv7713h25.execute-api.us-west-1.amazonaws.com"
+    "API_BASE_URL", "http://localhost:8000"
 )
 
 def get_ssm_parameter(name, default=None):
@@ -270,7 +270,8 @@ custom_css = Style("""
 # In Lambda, we MUST provide this to prevent writing .sesskey to the read-only filesystem
 SESSION_SECRET = get_ssm_parameter("/fitted/session-secret", os.environ.get("SESSION_SECRET", "local-dev-secret-key-change-in-prod"))
 
-app = FastHTMLWithLiveReload(
+AppClass = FastHTMLWithLiveReload if os.environ.get("DEV", "false").lower() == "true" else FastHTML
+app = AppClass(
     secret_key=SESSION_SECRET,
     hdrs=(
         Link(

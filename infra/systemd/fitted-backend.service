@@ -1,0 +1,14 @@
+[Unit]
+Description=Fitted FastAPI Backend
+After=network.target
+
+[Service]
+User=ec2-user
+WorkingDirectory=/home/ec2-user/fitted
+ExecStart=/home/ec2-user/fitted/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
+Restart=always
+RestartSec=5
+EnvironmentFile=/home/ec2-user/fitted/.env
+
+[Install]
+WantedBy=multi-user.target
