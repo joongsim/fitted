@@ -273,7 +273,7 @@ Resources:
           exec > /var/log/userdata.log 2>&1
 
           echo "=== Starting UserData ==="
-
+          # Force replacement: 1
           # System update
           dnf update -y
 

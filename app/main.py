@@ -11,7 +11,18 @@ from app.services import llm_service
 from app.core.config import config
 from app.services import analysis_service
 
-app = FastAPI()
+from contextlib import asynccontextmanager
+from app.services import db_service
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: Initialize DB pool
+    await db_service.init_pool()
+    yield
+    # Shutdown: Close DB pool
+    await db_service.close_pool()
+
+app = FastAPI(lifespan=lifespan)
 
 # Add CORS middleware
 app.add_middleware(

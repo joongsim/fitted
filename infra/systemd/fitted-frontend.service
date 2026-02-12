@@ -1,0 +1,15 @@
+[Unit]
+Description=Fitted FastHTML Frontend
+After=fitted-backend.service
+Wants=fitted-backend.service
+
+[Service]
+User=ec2-user
+WorkingDirectory=/home/ec2-user/fitted/frontend
+ExecStart=/home/ec2-user/fitted/.venv/bin/uvicorn app:app --host 127.0.0.1 --port 5001
+Restart=always
+RestartSec=5
+EnvironmentFile=/home/ec2-user/fitted/.env
+
+[Install]
+WantedBy=multi-user.target
