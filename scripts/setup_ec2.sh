@@ -21,7 +21,7 @@ fi
 
 # --- 3. Clone/Update Repo (Using SSH URL) ---
 cd /home/ec2-user
-SSH_REPO_URL="git@github.com:joshua-simpson/fitted.git"
+SSH_REPO_URL="git@github.com:joongsim/fitted.git"
 
 if [ ! -d "fitted" ]; then
     echo "Cloning repository via SSH..."
