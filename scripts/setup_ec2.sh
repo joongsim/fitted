@@ -1,17 +1,17 @@
 #!/bin/bash
 set -euo pipefail
 
-# --- 1. SSH Pre-flight Check ---
-# Ensure we can talk to GitHub via SSH. 
-# This also adds github.com to known_hosts so the script doesn't hang.
-echo "Checking GitHub SSH connectivity..."
-ssh-keyscan -t ed25519 github.com >> ~/.ssh/known_hosts 2>/dev/null
-if ssh -T git@github.com 2>&1 | grep -q "successfully authenticated"; then
-    echo "✅ GitHub SSH connection verified."
-else
-    echo "❌ Error: SSH authentication to GitHub failed."
-    exit 1
-fi
+# # --- 1. SSH Pre-flight Check ---
+# # Ensure we can talk to GitHub via SSH. 
+# # This also adds github.com to known_hosts so the script doesn't hang.
+# echo "Checking GitHub SSH connectivity..."
+# ssh-keyscan -t ed25519 github.com >> ~/.ssh/known_hosts 2>/dev/null
+# if ssh -T git@github.com 2>&1 | grep -q "successfully authenticated"; then
+#     echo "✅ GitHub SSH connection verified."
+# else
+#     echo "❌ Error: SSH authentication to GitHub failed."
+#     exit 1
+# fi
 
 # --- 2. Install Caddy ---
 if ! command -v caddy &> /dev/null; then
