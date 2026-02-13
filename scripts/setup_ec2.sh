@@ -69,5 +69,5 @@ sudo systemctl restart fitted-backend fitted-frontend
 sudo cp infra/Caddyfile /etc/caddy/Caddyfile
 sudo systemctl restart caddy
 
-IPV6_ADDR=$(curl -6 -s ifconfig.me || echo "unknown")
-echo "Setup complete. App should be running at http://[$IPV6_ADDR]/"
+IPV4_ADDR=$(curl -4 -s ifconfig.me || echo "unknown")
+echo "Setup complete. App should be running at http://$IPV4_ADDR/"
