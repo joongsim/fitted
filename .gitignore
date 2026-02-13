@@ -121,7 +121,7 @@ venv.bak/
 
 # key
 .ssh/*
-
+.ssh/
 # mypy
 .mypy_cache/
 .dmypy.json
