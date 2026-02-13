@@ -6,9 +6,10 @@ set -euo pipefail
 # This also adds github.com to known_hosts so the script doesn't hang.
 echo "Checking GitHub SSH connectivity..."
 ssh-keyscan -t ed25519 github.com >> ~/.ssh/known_hosts 2>/dev/null
-if ! ssh -T git@github.com 2>&1 | grep -q "successfully authenticated"; then
+if ssh -T git@github.com 2>&1 | grep -q "successfully authenticated"; then
+    echo "✅ GitHub SSH connection verified."
+else
     echo "❌ Error: SSH authentication to GitHub failed."
-    echo "Please ensure your Deploy Key is added to GitHub and the private key is on this EC2."
     exit 1
 fi
 
