@@ -152,18 +152,19 @@ graph TD
 **Status:** Basic front end implemented using FastHTML (HTMX-powered), connected to AWS Lambda API.
 **URL:** (Local development) http://localhost:5001
 
-### 📅 Week 4: EC2 + RDS Migration & Photo Upload (IN PROGRESS)
+### 📅 Week 4: EC2 + RDS Migration, User Auth & Photo Upload (IN PROGRESS)
 
-Migrate from Lambda to EC2 with RDS PostgreSQL. Add wardrobe photo upload. See [Week 4 detailed plan](.cursor/plans/week_4_ec2_rds_plan_90a4b00c.plan.md).
+Migrate from Lambda to EC2 with RDS PostgreSQL. Add user authentication and wardrobe photo upload. See [Week 4 detailed plan](.cursor/plans/week_4_ec2_rds_plan_90a4b00c.plan.md).
 
 - [x] **Phase 0:** Create SSH key pair, store DB password in SSM
 - [x] **Phase 1:** CloudFormation -- VPC (IPv6), subnets (2 AZs), EC2 t4g.micro (Dual-stack with Elastic IP), RDS db.t4g.micro (PostgreSQL 16 + pgvector, gp3), security groups, IAM (incl. s3:DeleteObject)
-- [x] **Phase 2:** Database schema (wardrobe_items table, HNSW index, updated_at trigger), psycopg async connection pool, `requirements-ec2.txt` (incl. python-fasthtml)
-- [x] **Phase 3:** EC2 deployment -- setup_ec2.sh (Caddy via COPR, .env with chmod 600), systemd services (Wants= dependency), Caddyfile (handle_path), config.py USE_SSM support, FastHTML production mode, gate /debug/config behind ENABLE_DEBUG, update pyproject.toml requires-python to >=3.11
-- [ ] **Phase 4:** Wardrobe API -- Pydantic models, CRUD service, S3 image upload/presign/delete, /wardrobe/* endpoints
-- [ ] **Phase 4T:** Tests -- conftest.py (psycopg3 cursor mocks, moto S3), wardrobe service/API/storage tests
-- [ ] **Phase 5:** Frontend wardrobe UI -- nav bar, upload form, gallery grid, HTMX delete
+- [x] **Phase 2:** Database schema (users and wardrobe_items tables, HNSW index, updated_at trigger), psycopg async connection pool, `requirements-ec2.txt` (incl. python-fasthtml)
+- [ ] **Phase 3:** EC2 deployment -- setup_ec2.sh (Caddy via COPR, .env with chmod 600), systemd services (Wants= dependency), Caddyfile (handle_path), config.py USE_SSM support, FastHTML production mode, gate /debug/config behind ENABLE_DEBUG, update pyproject.toml requires-python to >=3.11
+- [ ] **Phase 4:** User Auth & Wardrobe API -- JWT authentication with dev bypass, Pydantic models, CRUD service, S3 image upload/presign/delete, /auth/* and /wardrobe/* endpoints
+- [ ] **Phase 4T:** Tests -- conftest.py (psycopg3 cursor mocks, moto S3), auth/wardrobe service/API/storage tests
+- [ ] **Phase 5:** Frontend UI -- login/register pages, nav bar, upload form, gallery grid, HTMX delete
 - [ ] **Phase 6:** Deploy script, optional GitHub Actions for EC2
+- [ ] **Phase 7:** User Preferences -- Store style preferences (colors, styles, occasions) and update LLM prompts
 
 **Cost:** $0/month during free tier (EC2 + RDS free), ~$3.60/month for Elastic IP, ~$18/month after free tier expires
 
@@ -177,17 +178,8 @@ Migrate from Lambda to EC2 with RDS PostgreSQL. Add wardrobe photo upload. See [
 - [ ] Connect FastAPI to Databricks via SQL Connector
 - [ ] Build "Smart Wardrobe" endpoints in FastAPI
 
-### 📅 Week 6-8: User Profiles & Authentication
-- [ ] Set up DynamoDB tables for users and preferences
-- [ ] Implement JWT authentication in FastAPI
-- [ ] Create user registration/login endpoints
-- [ ] Add user profile management
-- [ ] Store style preferences (colors, styles, occasions)
-- [ ] Update LLM prompts to include user preferences
-- [ ] Track user usage and interactions
-
-### 📅 Week 9-12: RAG & Outfit Learning
-- [ ] Launch RDS PostgreSQL with pgvector extension
+### 📅 Week 6-8: RAG & Outfit Learning (REVISED)
+- [ ] Launch RDS PostgreSQL with pgvector extension (already set up in Week 4)
 - [ ] Design schema for outfit catalog and user history
 - [ ] Implement outfit image upload to S3
 - [ ] Generate image embeddings (AWS Rekognition or OpenAI CLIP)
@@ -195,6 +187,8 @@ Migrate from Lambda to EC2 with RDS PostgreSQL. Add wardrobe photo upload. See [
 - [ ] Implement RAG-based outfit recommendations
 - [ ] Track user outfit selections and satisfaction ratings
 - [ ] Build similarity search for "outfits like this"
+- [ ] Update LLM prompts to include user preferences (already captured in Week 4)
+- [ ] Track user usage and interactions
 
 ### 📅 Week 13-16: Affiliate Monetization
 - [ ] Research and select affiliate networks (Amazon, ShopStyle, Rakuten)
@@ -719,74 +713,78 @@ You will be prompted to enter your Databricks host and token.
 
 ---
 
-## User Profile & RAG Architecture (NEW)
+## User Profile & RAG Architecture (REVISED)
 
 ### Overview
 
-Starting in Week 6, we're adding user profiles and RAG-based personalization to the application. This requires a hybrid multi-database architecture.
+Starting in Week 4, we're adding user profiles and RAG-based personalization to the application. This uses RDS PostgreSQL for all relational and vector data.
 
 ### Data Model
-
-#### DynamoDB Tables
-
-**users table:**
-```json
-{
-  "user_id": "uuid-123",
-  "email": "user@example.com",
-  "name": "Jane Doe",
-  "created_at": "2024-01-15T10:00:00Z",
-  "last_login": "2024-01-20T15:30:00Z"
-}
-```
-
-**user_preferences table:**
-```json
-{
-  "user_id": "uuid-123",
-  "style_preferences": {
-    "colors": ["blue", "green", "neutral"],
-    "styles": ["casual", "business-casual"],
-    "occasions": ["work", "weekend"],
-    "avoid": ["bright-colors", "formal"]
-  },
-  "size_info": {
-    "top": "M",
-    "bottom": "32",
-    "shoe": "10"
-  }
-}
-```
 
 #### PostgreSQL Schema (with pgvector)
 
 ```sql
--- Outfit catalog with vector embeddings for RAG
-CREATE TABLE outfits (
-  outfit_id UUID PRIMARY KEY,
-  name VARCHAR(255),
-  description TEXT,
-  image_s3_path VARCHAR(500),
-  embedding VECTOR(512),  -- pgvector for semantic similarity
-  style_tags TEXT[],
-  created_at TIMESTAMP
+-- Users table
+CREATE TABLE users (
+    user_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    email VARCHAR(255) UNIQUE NOT NULL,
+    hashed_password VARCHAR(255) NOT NULL,
+    full_name VARCHAR(255),
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    last_login TIMESTAMPTZ
 );
 
--- User outfit selection history
-CREATE TABLE user_outfit_history (
-  id SERIAL PRIMARY KEY,
-  user_id UUID,
-  outfit_id UUID REFERENCES outfits(outfit_id),
-  weather_temp_c FLOAT,
-  weather_condition VARCHAR(100),
-  location VARCHAR(100),
-  satisfaction_score INT,  -- 1-5 rating
-  worn_date DATE,
-  created_at TIMESTAMP
+-- User preferences table
+CREATE TABLE user_preferences (
+    user_id UUID PRIMARY KEY REFERENCES users(user_id) ON DELETE CASCADE,
+    style_preferences JSONB DEFAULT '{
+        "colors": [],
+        "styles": [],
+        "occasions": [],
+        "avoid": []
+    }',
+    size_info JSONB DEFAULT '{
+        "top": null,
+        "bottom": null,
+        "shoe": null
+    }',
+    updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Vector similarity index
-CREATE INDEX ON outfits USING ivfflat (embedding vector_cosine_ops);
+-- Wardrobe items table (Updated from Week 4 Phase 2)
+CREATE TABLE wardrobe_items (
+    item_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+    name VARCHAR(255) NOT NULL,
+    description TEXT DEFAULT '',
+    category VARCHAR(50),
+    image_s3_key VARCHAR(500),
+    tags TEXT[] DEFAULT '{}',
+    classification JSONB,
+    embedding VECTOR(384),
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+```
+
+### Authentication & Dev Bypass
+
+**JWT Strategy:**
+- Use `python-jose` for JWT token generation and validation.
+- `passlib[bcrypt]` for password hashing.
+- Token stored in HTTP-only cookie for FastHTML frontend.
+
+**Dev Auth Bypass:**
+To simplify debugging, we implement a bypass when `IS_LOCAL=true` or `DEV_MODE=true`.
+
+```python
+# app/core/auth.py
+async def get_current_user(request: Request, db: AsyncConnection = Depends(get_db)):
+    if os.environ.get("DEV_MODE", "false").lower() == "true":
+        # Return a fixed mock user from DB or create one if missing
+        return await get_or_create_mock_user(db)
+    
+    # Standard JWT extraction and validation logic...
 ```
 
 ### RAG Implementation
