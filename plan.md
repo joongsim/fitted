@@ -156,16 +156,16 @@ graph TD
 
 Migrate from Lambda to EC2 with RDS PostgreSQL. Add wardrobe photo upload. See [Week 4 detailed plan](.cursor/plans/week_4_ec2_rds_plan_90a4b00c.plan.md).
 
-- [ ] **Phase 0:** Create SSH key pair, store DB password in SSM
-- [ ] **Phase 1:** CloudFormation -- VPC (IPv6), subnets (2 AZs), EC2 t4g.micro (IPv6-only, no EIP), RDS db.t4g.micro (PostgreSQL 16 + pgvector, gp3), security groups, IAM (incl. s3:DeleteObject)
-- [ ] **Phase 2:** Database schema (wardrobe_items table, HNSW index, updated_at trigger), psycopg async connection pool, `requirements-ec2.txt` (incl. python-fasthtml)
-- [ ] **Phase 3:** EC2 deployment -- setup_ec2.sh (Caddy via COPR, .env with chmod 600), systemd services (Wants= dependency), Caddyfile (handle_path), config.py USE_SSM support, FastHTML production mode, gate /debug/config behind ENABLE_DEBUG, update pyproject.toml requires-python to >=3.11
+- [x] **Phase 0:** Create SSH key pair, store DB password in SSM
+- [x] **Phase 1:** CloudFormation -- VPC (IPv6), subnets (2 AZs), EC2 t4g.micro (Dual-stack with Elastic IP), RDS db.t4g.micro (PostgreSQL 16 + pgvector, gp3), security groups, IAM (incl. s3:DeleteObject)
+- [x] **Phase 2:** Database schema (wardrobe_items table, HNSW index, updated_at trigger), psycopg async connection pool, `requirements-ec2.txt` (incl. python-fasthtml)
+- [x] **Phase 3:** EC2 deployment -- setup_ec2.sh (Caddy via COPR, .env with chmod 600), systemd services (Wants= dependency), Caddyfile (handle_path), config.py USE_SSM support, FastHTML production mode, gate /debug/config behind ENABLE_DEBUG, update pyproject.toml requires-python to >=3.11
 - [ ] **Phase 4:** Wardrobe API -- Pydantic models, CRUD service, S3 image upload/presign/delete, /wardrobe/* endpoints
 - [ ] **Phase 4T:** Tests -- conftest.py (psycopg3 cursor mocks, moto S3), wardrobe service/API/storage tests
 - [ ] **Phase 5:** Frontend wardrobe UI -- nav bar, upload form, gallery grid, HTMX delete
 - [ ] **Phase 6:** Deploy script, optional GitHub Actions for EC2
 
-**Cost:** $0/month during free tier (IPv6 is free, no public IPv4), ~$18/month after free tier expires
+**Cost:** $0/month during free tier (EC2 + RDS free), ~$3.60/month for Elastic IP, ~$18/month after free tier expires
 
 ### 📅 Week 5+: Enterprise AI, Databricks & dbt (FUTURE)
 - [ ] Implement PyTorch vision service for clothing classification
