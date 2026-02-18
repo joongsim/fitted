@@ -77,6 +77,21 @@ class Config:
         """Get Weather Data S3 bucket name."""
         return os.environ.get('WEATHER_BUCKET_NAME')
 
+    @property
+    def jwt_secret_key(self) -> str:
+        """Get JWT secret key."""
+        return self.get_parameter('/fitted/jwt-secret-key', default='dev-secret-key-change-me-in-prod')
+
+    @property
+    def jwt_algorithm(self) -> str:
+        """Get JWT algorithm."""
+        return self.get_parameter('/fitted/jwt-algorithm', default='HS256')
+
+    @property
+    def access_token_expire_minutes(self) -> int:
+        """Get access token expiration in minutes."""
+        return int(self.get_parameter('/fitted/access-token-expire-minutes', default='1440')) # 24 hours
+
 
 # Global config instance
 config = Config()

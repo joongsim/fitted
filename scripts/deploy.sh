@@ -16,18 +16,18 @@ git fetch origin
 git checkout "$BRANCH"
 git pull origin "$BRANCH"
 
-# Activate virtual environment
-echo "🐍 Activating virtual environment..."
-if [ -d ".venv" ]; then
-    source .venv/bin/activate
-else
-    echo "❌ Virtual environment not found. Please run setup_ec2.sh first."
-    exit 1
+# Ensure uv is installed
+if ! command -v uv &> /dev/null; then
+    echo "Installing uv..."
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+    source $HOME/.cargo/env
 fi
 
-# Install/Update dependencies
-echo "📦 Updating dependencies..."
-pip install -r requirements-ec2.txt --quiet
+# Activate/Update virtual environment
+echo "🐍 Updating virtual environment with uv..."
+uv venv --python 3.11 --quiet
+source .venv/bin/activate
+uv pip install -r requirements-ec2.txt --quiet
 
 # Run database migrations
 echo "🗄️ Running database migrations..."
