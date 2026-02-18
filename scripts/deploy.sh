@@ -36,7 +36,7 @@ if [ -f ".env" ]; then
     export $(grep -v '^#' .env | xargs)
 fi
 
-python scripts/db_migrate.py
+./.venv/bin/python scripts/db_migrate.py
 
 # Restart services
 echo "🔄 Restarting systemd services..."
