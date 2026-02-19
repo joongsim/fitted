@@ -3,10 +3,14 @@ from datetime import datetime
 from typing import Optional
 import boto3
 import os
+import logging
+
 from fastapi import FastAPI, HTTPException, Query, Depends, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordRequestForm
 from mangum import Mangum
+
+logger = logging.getLogger(__name__)
 from app.services import weather_service
 from app.services import llm_service
 from app.core.config import config
@@ -261,7 +265,7 @@ async def analyze_weather(bucket: Optional[str] = None, key: Optional[str] = Non
             # Get the most recent file
             latest_file = sorted(response['Contents'], key=lambda x: x['LastModified'], reverse=True)[0]
             key = latest_file['Key']
-            print(f"Found latest weather file: {key}")
+            logger.info("Found latest weather file: %s", key)
             
         except Exception as e:
             if isinstance(e, HTTPException):
