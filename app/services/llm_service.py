@@ -1,20 +1,34 @@
 # app/services/llm_service.py
-import httpx
 import json
+import logging
 import re
+from datetime import datetime
+from typing import Any, Dict, List, Optional
 
 from openai import AsyncOpenAI
+
 from app.core.config import config
-from typing import Optional, List, Dict, Any
 from app.models.outfit import OutfitSuggestion
 
+logger = logging.getLogger(__name__)
 
-def get_client():
-    """Get or create OpenRouter client."""
+_MODEL = "google/gemini-3-flash-preview"
+
+
+def get_client() -> Optional[AsyncOpenAI]:
+    """
+    Build and return an AsyncOpenAI client pointed at OpenRouter.
+
+    Returns:
+        Configured AsyncOpenAI client, or None if the API key is unavailable.
+    """
     try:
         api_key = config.openrouter_api_key
-    except Exception as e:
-        print(f"Warning: Could not get OpenRouter API key: {e}")
+    except Exception:
+        logger.warning(
+            "OpenRouter API key unavailable — LLM calls will fall back to rule-based suggestions.",
+            exc_info=True,
+        )
         return None
 
     return AsyncOpenAI(
@@ -34,16 +48,15 @@ async def get_outfit_suggestion(
     Generate outfit suggestion using LLM with forecast context.
 
     Args:
-        location: Location name
-        temp_c: Current temperature in Celsius
-        condition: Current weather condition
-        forecast: Optional forecast data for next few days
-        user_context: Optional user preferences (for future use)
+        location: Location name.
+        temp_c: Current temperature in Celsius.
+        condition: Current weather condition text.
+        forecast: Optional forecast data for next few days.
+        user_context: Optional user preferences.
 
     Returns:
-        Outfit suggestion dictionary with keys: top, bottom, outerwear, accessories
+        Outfit suggestion dictionary with keys: top, bottom, outerwear, accessories.
     """
-
     # Build context-aware prompt
     prompt_parts = [
         f"Location: {location}",
@@ -51,17 +64,13 @@ async def get_outfit_suggestion(
         f"Current condition: {condition}",
     ]
 
-    # Add forecast context if available
     if forecast and len(forecast) > 0:
         prompt_parts.append("\nForecast for the next few days:")
-        for day in forecast[:3]:  # Only use first 3 days
+        for day in forecast[:3]:
             prompt_parts.append(
                 f"- {day['date']}: {day['min_temp_c']}°C to {day['max_temp_c']}°C, "
                 f"{day['condition']}, {day.get('chance_of_rain', 0)}% chance of rain"
             )
-
-    # Add time of day context
-    from datetime import datetime
 
     current_hour = datetime.now().hour
     if 6 <= current_hour < 12:
@@ -75,11 +84,9 @@ async def get_outfit_suggestion(
 
     prompt_parts.append(f"\nTime of day: {time_context}")
 
-    # Add user preferences if available (for future use)
     if user_context:
         prompt_parts.append(f"\nUser preferences: {user_context}")
 
-    # Build final prompt
     weather_context = "\n".join(prompt_parts)
 
     full_prompt = f"""You are a professional fashion stylist. Based on the weather conditions below, suggest a complete, practical outfit.
@@ -105,14 +112,23 @@ async def get_outfit_suggestion(
         """
 
     try:
-        # Get OpenRouter client
         client = get_client()
         if not client:
+            logger.warning(
+                "No LLM client available — using rule-based fallback for location=%s.",
+                location,
+            )
             return _get_fallback_suggestion(temp_c, condition, forecast is not None)
-        
-        # Call OpenRouter API using AsyncOpenAI client
+
+        logger.info(
+            "Calling OpenRouter model=%s for outfit suggestion: location=%s temp_c=%.1f condition=%s",
+            _MODEL,
+            location,
+            temp_c,
+            condition,
+        )
         response = await client.chat.completions.create(
-            model="google/gemini-3-flash-preview",
+            model=_MODEL,
             messages=[
                 {
                     "role": "system",
@@ -125,15 +141,27 @@ async def get_outfit_suggestion(
         )
 
         raw_content = response.choices[0].message.content.strip()
-        
-        # Robust parsing
-        data = None
+        logger.debug(
+            "OpenRouter raw response for location=%s: %.300s", location, raw_content
+        )
+
+        usage = getattr(response, "usage", None)
+        if usage:
+            logger.debug(
+                "OpenRouter token usage: prompt=%s completion=%s total=%s",
+                getattr(usage, "prompt_tokens", "?"),
+                getattr(usage, "completion_tokens", "?"),
+                getattr(usage, "total_tokens", "?"),
+            )
+
+        # Robust JSON parsing
+        data: Optional[Dict[str, Any]] = None
         try:
-            # 1. Direct parse
             data = json.loads(raw_content)
         except json.JSONDecodeError:
-            # 2. Try extracting from markdown blocks
-            json_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", raw_content, re.DOTALL)
+            json_match = re.search(
+                r"```(?:json)?\s*(\{.*?\})\s*```", raw_content, re.DOTALL
+            )
             if json_match:
                 try:
                     data = json.loads(json_match.group(1))
@@ -141,42 +169,63 @@ async def get_outfit_suggestion(
                     pass
 
         if not data:
+            logger.error(
+                "Failed to parse JSON from OpenRouter response for location=%s. "
+                "Raw content (truncated): %.300s",
+                location,
+                raw_content,
+            )
             return _get_fallback_suggestion(temp_c, condition, forecast is not None)
 
-        # Validate with Pydantic
         try:
             validated = OutfitSuggestion(**data)
+            logger.info(
+                "Outfit suggestion generated via LLM for location=%s.", location
+            )
             return validated.model_dump()
-        except Exception as e:
-            print(f"Validation error: {e}")
+        except Exception:
+            logger.error(
+                "Pydantic validation of LLM response failed for location=%s.",
+                location,
+                exc_info=True,
+            )
             return _get_fallback_suggestion(temp_c, condition, forecast is not None)
 
-    except Exception as e:
-        print(f"Error calling LLM: {e}")
-        # Fallback to rule-based suggestion
+    except Exception:
+        logger.error(
+            "Unexpected error calling OpenRouter for location=%s — using fallback.",
+            location,
+            exc_info=True,
+        )
         return _get_fallback_suggestion(temp_c, condition, forecast is not None)
 
 
-def _get_fallback_suggestion(temp_c: float, condition: str, has_forecast: bool) -> Dict[str, str]:
+def _get_fallback_suggestion(
+    temp_c: float, condition: str, has_forecast: bool
+) -> Dict[str, str]:
     """
-    Provide simple rule-based outfit suggestion as fallback.
-    
+    Provide simple rule-based outfit suggestion as fallback when LLM is unavailable.
+
     Args:
-        temp_c: Temperature in Celsius
-        condition: Weather condition
-        has_forecast: Whether forecast data is available
-        
+        temp_c: Temperature in Celsius.
+        condition: Weather condition text.
+        has_forecast: Whether forecast data is available.
+
     Returns:
-        Basic outfit suggestion dictionary
+        Basic outfit suggestion dictionary.
     """
-    outfit = {
+    logger.info(
+        "Using rule-based fallback outfit suggestion: temp_c=%.1f condition=%s",
+        temp_c,
+        condition,
+    )
+    outfit: Dict[str, str] = {
         "top": "Comfortable t-shirt",
         "bottom": "Jeans",
         "outerwear": "None",
-        "accessories": "None"
+        "accessories": "None",
     }
-    
-    # Temperature-based suggestions
+
     if temp_c < 5:
         outfit["top"] = "Warm sweater or thermal top"
         outfit["bottom"] = "Insulated pants or heavy trousers"
@@ -194,25 +243,27 @@ def _get_fallback_suggestion(temp_c: float, condition: str, has_forecast: bool) 
         outfit["top"] = "Light, breathable t-shirt"
         outfit["bottom"] = "Shorts or light linen pants"
         outfit["outerwear"] = "None"
-    
-    # Condition-based accessories
+
     condition_lower = condition.lower()
-    accs = []
-    if any(word in condition_lower for word in ['rain', 'drizzle', 'shower']):
-        outfit["outerwear"] = "Raincoat" if outfit["outerwear"] == "None" else f"{outfit['outerwear']} and raincoat"
+    accs: List[str] = []
+    if any(word in condition_lower for word in ["rain", "drizzle", "shower"]):
+        outfit["outerwear"] = (
+            "Raincoat"
+            if outfit["outerwear"] == "None"
+            else f"{outfit['outerwear']} and raincoat"
+        )
         accs.append("Umbrella")
-    elif any(word in condition_lower for word in ['snow', 'sleet', 'blizzard']):
+    elif any(word in condition_lower for word in ["snow", "sleet", "blizzard"]):
         accs.append("Waterproof boots")
-    elif 'sun' in condition_lower or 'clear' in condition_lower:
+    elif "sun" in condition_lower or "clear" in condition_lower:
         accs.append("Sunglasses")
-    
+
     if accs:
         outfit["accessories"] = ", ".join(accs)
-        
+
     if has_forecast and outfit["accessories"] == "None":
         outfit["accessories"] = "Check forecast for changes"
     elif has_forecast:
         outfit["accessories"] += " (Check forecast for changes)"
-    
-    return outfit
 
+    return outfit
