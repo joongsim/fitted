@@ -1,9 +1,13 @@
 import os
+import sys
 import psycopg
 from psycopg import sql
 
-# Database connection details from environment or SSM
-DATABASE_URL = os.environ.get("DATABASE_URL")
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from app.core.config import config
+
+# Database connection URL from SSM (or env for local dev)
+DATABASE_URL = config.database_url
 
 SCHEMA_SQL = """
 -- Enable extensions

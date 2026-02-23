@@ -16,8 +16,7 @@ class Config:
     
     def __init__(self):
         self._ssm_client = None
-        self._use_ssm = os.environ.get("AWS_EXECUTION_ENV") is not None or \
-                        os.environ.get("USE_SSM", "false").lower() == "true"
+        self._use_ssm = os.environ.get("USE_SSM", "true").lower() != "false"
         
     @property
     def ssm_client(self):
