@@ -8,7 +8,8 @@ WorkingDirectory=/home/ec2-user/fitted
 ExecStart=/home/ec2-user/fitted/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
 Restart=always
 RestartSec=5
-EnvironmentFile=/home/ec2-user/fitted/.env
+Environment="USE_SSM=true"
+Environment="WEATHER_BUCKET_NAME=fitted-weather-data-dev"
 
 [Install]
 WantedBy=multi-user.target

@@ -9,7 +9,8 @@ WorkingDirectory=/home/ec2-user/fitted/frontend
 ExecStart=/home/ec2-user/fitted/.venv/bin/uvicorn app:app --host 127.0.0.1 --port 5001
 Restart=always
 RestartSec=5
-EnvironmentFile=/home/ec2-user/fitted/.env
+Environment="USE_SSM=true"
+Environment="API_BASE_URL=http://localhost:8000"
 
 [Install]
 WantedBy=multi-user.target
