@@ -9,6 +9,7 @@ ExecStart=/home/ec2-user/fitted/.venv/bin/uvicorn app.main:app --host 127.0.0.1 
 Restart=always
 RestartSec=5
 Environment="USE_SSM=true"
+Environment="AWS_DEFAULT_REGION=us-west-1"
 Environment="WEATHER_BUCKET_NAME=fitted-weather-data-dev"
 
 [Install]
