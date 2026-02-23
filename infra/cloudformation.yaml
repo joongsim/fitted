@@ -259,6 +259,11 @@ Resources:
                 Action:
                   - ssm:GetParameter
                 Resource: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/fitted/*'
+              # SSM instance information (required for SSM Agent registration checks)
+              - Effect: Allow
+                Action:
+                  - ssm:DescribeInstanceInformation
+                Resource: '*'
 
   EC2InstanceProfile:
     Type: AWS::IAM::InstanceProfile
