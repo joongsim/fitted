@@ -91,10 +91,11 @@ jobs:
 
           echo "SSM Command ID: $COMMAND_ID"
 
+          # Wait for completion; ignore waiter exit code so we always print output
           aws ssm wait command-executed \
             --region us-west-1 \
             --command-id "$COMMAND_ID" \
-            --instance-id "${{ secrets.EC2_INSTANCE_ID }}"
+            --instance-id "${{ secrets.EC2_INSTANCE_ID }}" || true
 
           STATUS=$(aws ssm get-command-invocation \
             --region us-west-1 \
@@ -103,6 +104,7 @@ jobs:
             --query 'Status' \
             --output text)
 
+          echo "--- STDOUT ---"
           aws ssm get-command-invocation \
             --region us-west-1 \
             --command-id "$COMMAND_ID" \
@@ -110,13 +112,15 @@ jobs:
             --query 'StandardOutputContent' \
             --output text
 
+          echo "--- STDERR ---"
+          aws ssm get-command-invocation \
+            --region us-west-1 \
+            --command-id "$COMMAND_ID" \
+            --instance-id "${{ secrets.EC2_INSTANCE_ID }}" \
+            --query 'StandardErrorContent' \
+            --output text
+
           if [ "$STATUS" != "Success" ]; then
-            echo "--- STDERR ---"
-            aws ssm get-command-invocation \
-              --region us-west-1 \
-              --command-id "$COMMAND_ID" \
-              --instance-id "${{ secrets.EC2_INSTANCE_ID }}" \
-              --query 'StandardErrorContent' \
-              --output text
+            echo "Deploy failed with status: $STATUS"
             exit 1
           fi
