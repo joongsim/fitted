@@ -37,13 +37,13 @@ else
 fi
 
 # --- 4. Python Environment ---
-if [ ! -d ".venv" ]; then
-    python3.11 -m venv .venv
+if ! command -v uv &> /dev/null; then
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+    source "$HOME/.local/bin/env"
 fi
 
-source .venv/bin/activate
-pip install --upgrade pip
-pip install -r requirements-ec2.txt
+uv venv
+uv pip install -r requirements-ec2.txt
 
 # --- 5. Environment Variables ---
 if [ ! -f ".env" ]; then
