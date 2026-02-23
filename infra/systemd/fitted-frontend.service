@@ -2,13 +2,15 @@
 Description=Fitted FastHTML Frontend
 After=fitted-backend.service
 Wants=fitted-backend.service
+StartLimitIntervalSec=120
+StartLimitBurst=5
 
 [Service]
 User=ec2-user
 WorkingDirectory=/home/ec2-user/fitted/frontend
 ExecStart=/home/ec2-user/fitted/.venv/bin/uvicorn app:app --host 127.0.0.1 --port 5001
-Restart=always
-RestartSec=5
+Restart=on-failure
+RestartSec=10
 Environment="USE_SSM=true"
 Environment="AWS_DEFAULT_REGION=us-west-1"
 Environment="API_BASE_URL=http://localhost:8000"

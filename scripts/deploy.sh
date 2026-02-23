@@ -32,6 +32,12 @@ uv pip install -r requirements-ec2.txt --quiet
 # NOTE: Database migrations are intentionally excluded from automated deploy.
 # Run manually when needed: ./.venv/bin/python scripts/db_migrate.py
 
+# Sync systemd service files
+echo "⚙️  Syncing systemd service files..."
+sudo cp "$PROJECT_DIR/infra/systemd/fitted-backend.service" /etc/systemd/system/
+sudo cp "$PROJECT_DIR/infra/systemd/fitted-frontend.service" /etc/systemd/system/
+sudo systemctl daemon-reload
+
 # Restart services
 echo "🔄 Restarting systemd services..."
 sudo systemctl restart fitted-backend
