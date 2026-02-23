@@ -79,8 +79,11 @@ class Config:
 
     @property
     def weather_bucket_name(self) -> str:
-        """Get Weather Data S3 bucket name."""
-        return os.environ.get('WEATHER_BUCKET_NAME')
+        """Get Weather Data S3 bucket name from environment (injected by SAM template)."""
+        value = os.environ.get("WEATHER_BUCKET_NAME")
+        if not value:
+            raise ValueError("WEATHER_BUCKET_NAME environment variable is not set")
+        return value
 
     @property
     def jwt_secret_key(self) -> str:
