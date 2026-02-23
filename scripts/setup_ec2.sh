@@ -45,29 +45,7 @@ fi
 uv venv
 uv pip install -r requirements-ec2.txt
 
-# --- 5. Environment Variables ---
-if [ ! -f ".env" ]; then
-    echo "Creating .env template..."
-    cat > .env << 'ENVFILE'
-DATABASE_URL=postgresql://fitted_admin:<password>@<rds-endpoint>:5432/fitted
-WEATHER_BUCKET_NAME=<bucket-name>
-OPENROUTER_API_KEY=<key>
-WEATHER_API_KEY=<key>
-IS_LOCAL=false
-API_BASE_URL=http://localhost:8000
-ENVFILE
-    chmod 600 .env
-    echo "IMPORTANT: Please edit .env with actual secrets!"
-fi
-
-# --- 6. Database Migration ---
-if grep -q "<password>" .env; then
-    echo "Skipping migration - .env needs to be configured first."
-else
-    python scripts/db_migrate.py
-fi
-
-# --- 7. Systemd & Caddy ---
+# --- 5. Systemd & Caddy ---
 # Note: Ensure these files exist in your repo at these paths!
 sudo cp infra/systemd/fitted-backend.service /etc/systemd/system/
 sudo cp infra/systemd/fitted-frontend.service /etc/systemd/system/

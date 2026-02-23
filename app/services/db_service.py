@@ -1,23 +1,22 @@
 import os
 from contextlib import asynccontextmanager
 from psycopg_pool import AsyncConnectionPool
-
-# DATABASE_URL should be set in .env or environment
-DATABASE_URL = os.environ.get("DATABASE_URL")
+from app.core.config import config
 
 pool: AsyncConnectionPool | None = None
 
 async def init_pool():
     """Initialize connection pool. Call on app startup."""
     global pool
-    if not DATABASE_URL:
+    database_url = config.database_url
+    if not database_url:
         print("Warning: DATABASE_URL not set. Database pool not initialized.")
         return
-    
+
     pool = AsyncConnectionPool(
-        conninfo=DATABASE_URL, 
-        min_size=2, 
-        max_size=10, 
+        conninfo=database_url,
+        min_size=2,
+        max_size=10,
         open=False
     )
     await pool.open()

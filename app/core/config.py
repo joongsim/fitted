@@ -73,6 +73,11 @@ class Config:
         return self.get_parameter('/fitted/weather-api-key')
     
     @property
+    def database_url(self) -> str:
+        """Get PostgreSQL connection URL."""
+        return self.get_parameter('/fitted/database-url')
+
+    @property
     def weather_bucket_name(self) -> str:
         """Get Weather Data S3 bucket name."""
         return os.environ.get('WEATHER_BUCKET_NAME')
