@@ -10,6 +10,9 @@ aws/
 # Private documentation (review before committing)
 docs/private/
 .cursor/
+.claude/
+CLAUDE.md
+archive/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

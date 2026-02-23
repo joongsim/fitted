@@ -1,9 +1,12 @@
 import boto3
 import json
+import logging
 import time
 import os
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
+
+logger = logging.getLogger(__name__)
 
 
 class AthenaQueryService:
@@ -11,14 +14,30 @@ class AthenaQueryService:
     Service for querying weather data using AWS Athena.
     Provides SQL-based analytics on S3 data without loading into a database.
     """
-    
-    def __init__(self):
-        self.athena_client = boto3.client('athena')
-        self.s3_client = boto3.client('s3')
+
+    def __init__(self) -> None:
+        self._athena_client: Any = None
+        self._s3_client: Any = None
         self.database = os.environ.get('ATHENA_DATABASE', 'fitted_weather_db')
         self.table = os.environ.get('ATHENA_TABLE', 'weather_data')
-        self.output_location = os.environ.get('ATHENA_OUTPUT_LOCATION',
-                                              f"s3://{os.environ.get('WEATHER_BUCKET_NAME')}/athena-results/")
+        self.output_location = os.environ.get(
+            'ATHENA_OUTPUT_LOCATION',
+            f"s3://{os.environ.get('WEATHER_BUCKET_NAME')}/athena-results/",
+        )
+
+    @property
+    def athena_client(self) -> Any:
+        """Lazily create the Athena boto3 client on first use."""
+        if self._athena_client is None:
+            self._athena_client = boto3.client('athena')
+        return self._athena_client
+
+    @property
+    def s3_client(self) -> Any:
+        """Lazily create the S3 boto3 client on first use."""
+        if self._s3_client is None:
+            self._s3_client = boto3.client('s3')
+        return self._s3_client
         
     def execute_query(self, query: str, wait: bool = True) -> str:
         """
@@ -39,15 +58,15 @@ class AthenaQueryService:
             )
             
             query_execution_id = response['QueryExecutionId']
-            print(f"Started Athena query: {query_execution_id}")
-            
+            logger.info("Started Athena query: %s", query_execution_id)
+
             if wait:
                 self._wait_for_query(query_execution_id)
-            
+
             return query_execution_id
-            
+
         except Exception as e:
-            print(f"Error executing Athena query: {e}")
+            logger.error("Error executing Athena query: %s", e)
             raise
     
     def _wait_for_query(self, query_execution_id: str, max_wait: int = 60) -> str:
@@ -62,7 +81,7 @@ class AthenaQueryService:
             status = response['QueryExecution']['Status']['State']
             
             if status == 'SUCCEEDED':
-                print(f"Query {query_execution_id} succeeded")
+                logger.info("Query %s succeeded", query_execution_id)
                 return status
             elif status in ['FAILED', 'CANCELLED']:
                 reason = response['QueryExecution']['Status'].get('StateChangeReason', 'Unknown')
@@ -103,7 +122,7 @@ class AthenaQueryService:
             return results
             
         except Exception as e:
-            print(f"Error getting query results: {e}")
+            logger.error("Error getting query results: %s", e)
             raise
     
     def query_and_get_results(self, query: str) -> List[Dict[str, Any]]:
@@ -155,10 +174,10 @@ def query_weather_by_temperature(min_temp: float = 15.0,
     
     try:
         results = athena_service.query_and_get_results(query)
-        print(f"Found {len(results)} locations with temp > {min_temp}°C")
+        logger.info("Found %d locations with temp > %s°C", len(results), min_temp)
         return results
     except Exception as e:
-        print(f"Error querying weather data: {e}")
+        logger.error("Error querying weather data: %s", e)
         raise
 
 
@@ -195,10 +214,10 @@ def get_location_weather_trend(location: str, days: int = 7) -> List[Dict[str, A
     
     try:
         results = athena_service.query_and_get_results(query)
-        print(f"Retrieved {len(results)} days of weather data for {location}")
+        logger.info("Retrieved %d days of weather data for %s", len(results), location)
         return results
     except Exception as e:
-        print(f"Error querying location trend: {e}")
+        logger.error("Error querying location trend: %s", e)
         raise
 
 
@@ -231,11 +250,11 @@ def get_weather_analytics_summary(date: Optional[str] = None) -> Dict[str, Any]:
         results = athena_service.query_and_get_results(query)
         if results:
             summary = results[0]
-            print(f"Analytics summary for {date}: {summary}")
+            logger.info("Analytics summary for %s: %s", date, summary)
             return summary
         return {}
     except Exception as e:
-        print(f"Error getting analytics summary: {e}")
+        logger.error("Error getting analytics summary: %s", e)
         raise
 
 
@@ -268,10 +287,10 @@ def get_weather_by_condition(condition: str, date: Optional[str] = None) -> List
     
     try:
         results = athena_service.query_and_get_results(query)
-        print(f"Found {len(results)} locations with condition: {condition}")
+        logger.info("Found %d locations with condition: %s", len(results), condition)
         return results
     except Exception as e:
-        print(f"Error querying by condition: {e}")
+        logger.error("Error querying by condition: %s", e)
         raise
 
 
@@ -283,23 +302,26 @@ def query_weather_file(bucket: str, key: str):
     """
     s3 = boto3.client("s3", region_name="us-west-1")
     
-    print(f"⚠️  Using legacy file query for {key}. Consider using Athena queries instead.")
-    
+    logger.warning("Using legacy file query for %s. Consider using Athena queries instead.", key)
+
     try:
         response = s3.get_object(Bucket=bucket, Key=key)
         content = response['Body'].read().decode('utf-8')
         data = json.loads(content)
-        
+
         if data.get('current', {}).get('temp_c', 0) > 15:
             result = {
                 "location": data.get('location'),
                 "temperature_c": data.get('current', {}).get('temp_c'),
-                "condition_text": data.get('current', {}).get('condition', {}).get('text')
+                "condition_text": data.get('current', {}).get('condition', {}).get('text'),
             }
-            print(f"Match Found: {json.dumps(result)}")
+            logger.info("Match found: %s", json.dumps(result))
         else:
-            print(f"No match found (Temperature {data.get('current', {}).get('temp_c')} <= 15)")
-            
+            logger.info(
+                "No match found (Temperature %s <= 15)",
+                data.get('current', {}).get('temp_c'),
+            )
+
     except Exception as e:
-        print(f"Error querying file: {e}")
+        logger.error("Error querying file: %s", e)
         raise e
