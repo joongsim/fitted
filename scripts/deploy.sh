@@ -25,7 +25,7 @@ fi
 
 # Activate/Update virtual environment
 echo "🐍 Updating virtual environment with uv..."
-uv venv --python 3.11 --quiet
+[ -d .venv ] || uv venv --python 3.11 --quiet
 source .venv/bin/activate
 uv pip install -r requirements-ec2.txt --quiet
 
