@@ -10,11 +10,15 @@ echo "🚀 Starting deployment to EC2..."
 # Navigate to project directory
 cd "$PROJECT_DIR"
 
-# Pull latest changes
-echo "📥 Pulling latest changes from $BRANCH..."
-git fetch origin
-git checkout "$BRANCH"
-git pull origin "$BRANCH"
+# Pull latest changes, then re-exec so the updated script version runs.
+# (Bash may buffer the old file in memory before git pull rewrites it.)
+if [[ "${_FITTED_UPDATED:-false}" != "true" ]]; then
+    echo "📥 Pulling latest changes from $BRANCH..."
+    git fetch origin
+    git checkout "$BRANCH"
+    git pull origin "$BRANCH"
+    exec env _FITTED_UPDATED=true bash "$0" "$@"
+fi
 
 # Ensure uv is installed
 if ! command -v uv &> /dev/null; then
