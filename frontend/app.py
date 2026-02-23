@@ -1,26 +1,33 @@
 """FastHTML frontend for Fitted - AI Weather Stylist"""
 
 # ruff: noqa: F405
-from fasthtml.common import *  # noqa: F403, F405 star import ok for fasthtml
+import logging
+
 import boto3
 import httpx
+from fasthtml.common import *  # noqa: F403, F405 star import ok for fasthtml
 from mangum import Mangum
 import os
+
+logger = logging.getLogger(__name__)
 
 # API Configuration
 API_BASE_URL = os.environ.get(
     "API_BASE_URL", "http://localhost:8000"
 )
 
-def get_ssm_parameter(name, default=None):
+def get_ssm_parameter(name: str, default: str = None) -> str:
     """Fetch parameter from SSM Parameter Store (for Lambda) or return default."""
     if os.environ.get("AWS_EXECUTION_ENV"):
         try:
             ssm = boto3.client("ssm")
             response = ssm.get_parameter(Name=name, WithDecryption=True)
+            logger.debug("Fetched SSM parameter: %s", name)
             return response["Parameter"]["Value"]
-        except Exception as e:
-            print(f"Error fetching SSM parameter {name}: {e}")
+        except Exception:
+            logger.error(
+                "Failed to fetch SSM parameter: %s", name, exc_info=True
+            )
             return default
     return default
 
@@ -453,14 +460,22 @@ def login_page(session):
 async def login(username: str, password: str, session):
     async with httpx.AsyncClient() as client:
         try:
-            resp = await client.post(f"{API_BASE_URL}/auth/login", data={"username": username, "password": password})
+            resp = await client.post(
+                f"{API_BASE_URL}/auth/login",
+                data={"username": username, "password": password},
+            )
             if resp.status_code == 200:
                 data = resp.json()
                 session["access_token"] = data["access_token"]
+                logger.info("User logged in via frontend.")
                 return RedirectResponse("/", status_code=303)
+            logger.warning(
+                "Frontend login failed: backend returned status=%d", resp.status_code
+            )
             return error_message("Invalid email or password")
-        except Exception as e:
-            return error_message(f"Login failed: {str(e)}")
+        except Exception:
+            logger.error("Frontend login request to backend failed.", exc_info=True)
+            return error_message("Login failed: could not reach the server")
 
 @app.get("/register")
 def register_page(session):
@@ -486,13 +501,25 @@ def register_page(session):
 async def register(full_name: str, email: str, password: str, session):
     async with httpx.AsyncClient() as client:
         try:
-            resp = await client.post(f"{API_BASE_URL}/auth/register", json={"full_name": full_name, "email": email, "password": password})
+            resp = await client.post(
+                f"{API_BASE_URL}/auth/register",
+                json={"full_name": full_name, "email": email, "password": password},
+            )
             if resp.status_code == 200:
+                logger.info("New user registered via frontend.")
                 return RedirectResponse("/login", status_code=303)
             err = resp.json().get("detail", "Registration failed")
+            logger.warning(
+                "Frontend registration failed: backend returned status=%d detail=%s",
+                resp.status_code,
+                err,
+            )
             return error_message(err)
-        except Exception as e:
-            return error_message(f"Registration failed: {str(e)}")
+        except Exception:
+            logger.error(
+                "Frontend registration request to backend failed.", exc_info=True
+            )
+            return error_message("Registration failed: could not reach the server")
 
 @app.get("/logout")
 def logout(session):
@@ -501,8 +528,10 @@ def logout(session):
 
 @app.post("/get-outfit")
 async def get_outfit(location: str, session):
-    if not location or not location.strip(): return error_message("Please enter a location.")
+    if not location or not location.strip():
+        return error_message("Please enter a location.")
     location = location.strip()
+    logger.info("Outfit request from frontend for location=%s", location)
     headers = {}
     if "access_token" in session:
         headers["Authorization"] = f"Bearer {session['access_token']}"
@@ -510,25 +539,45 @@ async def get_outfit(location: str, session):
     try:
         async with httpx.AsyncClient() as client:
             url = f"{API_BASE_URL}/suggest-outfit"
-            response = await client.post(url, params={"location": location}, headers=headers, timeout=30.0)
+            response = await client.post(
+                url, params={"location": location}, headers=headers, timeout=30.0
+            )
             if response.status_code == 404:
-                response = await client.post(f"{url}/", params={"location": location}, headers=headers, timeout=30.0)
+                response = await client.post(
+                    f"{url}/",
+                    params={"location": location},
+                    headers=headers,
+                    timeout=30.0,
+                )
             if response.status_code != 200:
                 err = response.json().get("detail", "Unknown error")
+                logger.error(
+                    "Backend returned error for outfit request: location=%s status=%d detail=%s",
+                    location,
+                    response.status_code,
+                    err,
+                )
                 return error_message(f"Error: {err}")
-            
+
             data = response.json()
             weather_data = data.get("weather", {})
             location_info = weather_data.get("location", {})
             weather = weather_data.get("current", {})
             forecast = weather_data.get("forecast")[0]
             outfit = data.get("outfit_suggestion", {})
-            
-            parts = [location_info.get("name"), location_info.get("region"), location_info.get("country")]
+
+            parts = [
+                location_info.get("name"),
+                location_info.get("region"),
+                location_info.get("country"),
+            ]
             display_location = ", ".join(p for p in parts if p) or location.title()
             return weather_results(display_location, weather, forecast, outfit)
-    except Exception as e:
-        return error_message(f"Connection error: {str(e)}")
+    except Exception:
+        logger.error(
+            "Connection error fetching outfit for location=%s.", location, exc_info=True
+        )
+        return error_message("Connection error: could not reach the server")
 
 handler = Mangum(app, lifespan="off")
 

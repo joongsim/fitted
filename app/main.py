@@ -57,17 +57,20 @@ async def register(user_in: UserCreate):
     # Check if user already exists
     existing_user = await user_service.get_user_by_email(user_in.email)
     if existing_user:
+        logger.warning("Registration attempted for already-registered email.")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="User with this email already exists",
         )
-    
+
     user = await user_service.create_user(user_in)
     if not user:
+        logger.error("User creation returned None — check db_service logs for details.")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to create user",
         )
+    logger.info("User registered successfully: user_id=%s", user.user_id)
     return user
 
 @app.post("/auth/login", response_model=Token)
@@ -81,13 +84,17 @@ async def login(
     """
     user = await user_service.get_user_by_email(form_data.username)
     if not user or not auth.verify_password(form_data.password, user["hashed_password"]):
+        logger.warning("Failed login attempt — bad credentials.")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
+
     if not user["is_active"]:
+        logger.warning(
+            "Login attempt by inactive user: user_id=%s", user["user_id"]
+        )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Inactive user",
@@ -95,7 +102,7 @@ async def login(
 
     # Create access token
     access_token = auth.create_access_token(data={"sub": str(user["user_id"])})
-    
+
     # Set HTTP-only cookie for browser/FastHTML
     # secure=False for now since we are on HTTP (no SSL yet)
     response.set_cookie(
@@ -105,12 +112,13 @@ async def login(
         max_age=config.access_token_expire_minutes * 60,
         expires=config.access_token_expire_minutes * 60,
         samesite="lax",
-        secure=False 
+        secure=False,
     )
-    
+
     # Update last login
     await user_service.update_last_login(str(user["user_id"]))
-    
+    logger.info("User logged in successfully: user_id=%s", user["user_id"])
+
     return {"access_token": access_token, "token_type": "bearer"}
 
 @app.post("/auth/logout")
@@ -190,6 +198,11 @@ async def suggest_outfit(
         location: Location name
         include_forecast: Whether to include forecast data
     """
+    logger.info(
+        "Outfit suggestion requested: location=%s include_forecast=%s",
+        location,
+        include_forecast,
+    )
     try:
         # Get weather data (with or without forecast)
         if include_forecast:
@@ -241,6 +254,9 @@ async def suggest_outfit(
         }
         
     except Exception as e:
+        logger.error(
+            "Unhandled error generating outfit for location=%s.", location, exc_info=True
+        )
         raise HTTPException(status_code=500, detail=f"Error generating outfit: {str(e)}")
 
 @app.post("/analyze-weather")
