@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Configuration
 PROJECT_DIR="/home/ec2-user/fitted"
-BRANCH="feature/add-users"
+BRANCH="${1:-dev}"
 
 echo "🚀 Starting deployment to EC2..."
 
