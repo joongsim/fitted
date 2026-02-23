@@ -5,6 +5,7 @@ from fasthtml.common import *  # noqa: F403, F405 star import ok for fasthtml
 import boto3
 import httpx
 from mangum import Mangum
+import os
 
 # API Configuration
 API_BASE_URL = os.environ.get(
@@ -43,9 +44,22 @@ custom_css = Style("""
         padding: 0;
         min-height: 200vh;
         display: flex;
-        justify-content: center;
+        flex-direction: column;
+        align-items: center;
     }
     
+    .nav-bar {
+        width: 100%;
+        max-width: 450px;
+        display: flex;
+        justify-content: space-between;
+        padding: 1rem;
+        border-bottom: 2px solid #000;
+        margin-bottom: 1.5rem;
+    }
+    .nav-bar a { text-decoration: none; color: #000; font-weight: bold; }
+    .nav-bar a.active { color: #16a34a; }
+
     .container {
         max-width: 450px;
         width: 100%;
@@ -264,10 +278,32 @@ custom_css = Style("""
     .loading-spinner {
         display: none;
     }
+
+    /* Auth Styles */
+    .auth-form {
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+        margin-top: 2rem;
+    }
+    .auth-form input {
+        border: 2px solid #000;
+    }
+    .auth-form button {
+        background-color: #95FB62;
+        border: 2px solid #000;
+        color: #000;
+        font-weight: bold;
+    }
+    .auth-link {
+        text-align: center;
+        margin-top: 1rem;
+        font-size: 0.875rem;
+    }
+    .auth-link a { color: #16a34a; font-weight: bold; }
 """)
 
 # Get session secret from environment or generate a random one for local use
-# In Lambda, we MUST provide this to prevent writing .sesskey to the read-only filesystem
 SESSION_SECRET = get_ssm_parameter("/fitted/session-secret", os.environ.get("SESSION_SECRET", "local-dev-secret-key-change-in-prod"))
 
 AppClass = FastHTMLWithLiveReload if os.environ.get("DEV", "false").lower() == "true" else FastHTML
@@ -278,25 +314,35 @@ app = AppClass(
             rel="stylesheet",
             href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css",
         ),
+        Script(src="https://unpkg.com/htmx.org@2.0.4"),
         custom_css,
     )
 )
 
+def nav_bar(session):
+    """Render the navigation bar based on auth state."""
+    is_logged_in = "access_token" in session
+    links = [A("fitted", href="/")]
+    if is_logged_in:
+        links.extend([
+            A("Wardrobe", href="/wardrobe"),
+            A("Logout", href="/logout")
+        ])
+    else:
+        links.extend([
+            A("Login", href="/login"),
+            A("Register", href="/register")
+        ])
+    return Div(*links, cls="nav-bar")
 
 def metric_card(label: str, value: str, icon: str) -> Div:
     """A small card for weather metrics."""
-    icons = {
-        "thermometer": "🌡️",
-        "droplets": "💧",
-        "wind": "💨",
-        "sun": "☀️",
-    }
+    icons = {"thermometer": "🌡️", "droplets": "💧", "wind": "💨", "sun": "☀️"}
     return Div(
         Div(Span(icons.get(icon, "📊")), Span(f"{label}:"), cls="metric-label"),
         Div(value, cls="metric-value"),
         cls="metric-card retro-card",
     )
-
 
 def outfit_item(label: str, value: str) -> Div:
     """A themed container for an outfit item."""
@@ -305,7 +351,6 @@ def outfit_item(label: str, value: str) -> Div:
         Div(value, cls="outfit-item-value"),
         cls="outfit-item retro-card",
     )
-
 
 def weather_results(location: str, weather: dict, forecast: dict, outfit: dict) -> Div:
     """Render weather and outfit results."""
@@ -320,26 +365,14 @@ def weather_results(location: str, weather: dict, forecast: dict, outfit: dict) 
     
     outfit_top = outfit.get("top", "None") if isinstance(outfit, dict) else str(outfit)
     outfit_bottom = outfit.get("bottom", "None") if isinstance(outfit, dict) else ""
-    outfit_outerwear = (
-        outfit.get("outerwear", "None") if isinstance(outfit, dict) else ""
-    )
-    outfit_accessories = (
-        outfit.get("accessories", "None") if isinstance(outfit, dict) else ""
-    )
+    outfit_outerwear = outfit.get("outerwear", "None") if isinstance(outfit, dict) else ""
+    outfit_accessories = outfit.get("accessories", "None") if isinstance(outfit, dict) else ""
 
-    outfit_items = [
-        outfit_item("Top", outfit_top),
-        outfit_item("Bottom", outfit_bottom),
-    ]
-
-    if outfit_outerwear and outfit_outerwear != "None":
-        outfit_items.append(outfit_item("Outerwear", outfit_outerwear))
-
-    if outfit_accessories and outfit_accessories != "None":
-        outfit_items.append(outfit_item("Accessories", outfit_accessories))
+    outfit_items = [outfit_item("Top", outfit_top), outfit_item("Bottom", outfit_bottom)]
+    if outfit_outerwear and outfit_outerwear != "None": outfit_items.append(outfit_item("Outerwear", outfit_outerwear))
+    if outfit_accessories and outfit_accessories != "None": outfit_items.append(outfit_item("Accessories", outfit_accessories))
 
     return Div(
-        # Combined Weather Card
         Div(
             Div(
                 Div(
@@ -349,13 +382,9 @@ def weather_results(location: str, weather: dict, forecast: dict, outfit: dict) 
                     Div(f"Low: {min_temp_f}°F", cls="weather-low"),
                     Div(f"High: {max_temp_f}°F", cls="weather-high"),
                 ),
-                # Div(
-
-                # ),
                 cls="weather-main",
                 style="margin-bottom: 1.5rem",
             ),
-            # Metrics List inside the card
             Details(
                 Summary("Weather Details"),
                 Div(
@@ -368,142 +397,141 @@ def weather_results(location: str, weather: dict, forecast: dict, outfit: dict) 
             ),
             cls="weather-card retro-card",
         ),
-        # Outfit Section
         Div(*outfit_items, cls="outfit-section"),
         id="results",
     )
-
 
 def error_message(message: str) -> Div:
     """Render an error message."""
     return Div(f"⚠️ {message}", cls="error-message", id="results")
 
-
 @app.get("/")
-def home():
+def home(session):
     """Main page."""
-    return Html(
-        Head(
-            Title("Fitted - AI Weather Stylist"),
-            Meta(charset="utf-8"),
-            Meta(name="viewport", content="width=device-width, initial-scale=1"),
-            Link(
-                rel="stylesheet",
-                href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css",
-            ),
-            Script(src="https://unpkg.com/htmx.org@2.0.4"),
-            custom_css,
-        ),
-        Body(
-            Div(
-                # Header
-                Div(H1("fitted"), cls="header"),
-                # Search Form
-                Form(
-                    Div(
-                        Input(
-                            type="text",
-                            name="location",
-                            placeholder="Enter city (e.g., San Francisco)",
-                            required=True,
-                            cls="half-width-input",
-                        ),
-                        cls="search-form-input-row",
-                    ),
-                    Div(
-                        Button(
-                            Span("Go", cls="loading-text"),
-                            Span(cls="loading loading-spinner"),
-                            type="submit",
-                            cls="full-width-btn",
-                        ),
-                        cls="search-form-btn-row",
-                    ),
-                    hx_post="/get-outfit",
-                    hx_target="#results",
-                    hx_swap="outerHTML",
-                    hx_indicator="closest form",
-                    cls="search-form",
+    return Title("Fitted - AI Weather Stylist"), Body(
+        nav_bar(session),
+        Div(
+            Div(H1("fitted"), cls="header"),
+            Form(
+                Div(
+                    Input(type="text", name="location", placeholder="Enter city (e.g., San Francisco)", required=True),
+                    cls="search-form-input-row",
                 ),
-                # Results placeholder
-                Div(id="results"),
-                cls="container",
-            )
+                Div(
+                    Button(Span("Go", cls="loading-text"), Span(cls="loading loading-spinner"), type="submit"),
+                    cls="search-form-btn-row",
+                ),
+                hx_post="/get-outfit", hx_target="#results", hx_swap="outerHTML", hx_indicator="closest form",
+                cls="search-form",
+            ),
+            Div(id="results"),
+            cls="container",
         ),
         data_theme="light",
     )
 
+@app.get("/login")
+def login_page(session):
+    if "access_token" in session: return RedirectResponse("/")
+    return Title("Login - Fitted"), Body(
+        nav_bar(session),
+        Div(
+            H2("Login"),
+            Form(
+                Input(type="email", name="username", placeholder="Email", required=True),
+                Input(type="password", name="password", placeholder="Password", required=True),
+                Button("Login", type="submit"),
+                hx_post="/login", hx_target="body",
+                cls="auth-form"
+            ),
+            Div("Don't have an account? ", A("Register here", href="/register"), cls="auth-link"),
+            cls="container"
+        )
+    )
 
-def format_location(location_data: dict, fallback: str) -> str:
-    """Format location with proper capitalization and state/region."""
-    if location_data:
-        parts = [
-            location_data.get("name"),
-            location_data.get("region"),
-            location_data.get("country")
-        ]
-        # Filter out None or empty strings and join
-        location_str = ", ".join(part for part in parts if part)
-        if location_str:
-            return location_str
-    # Fallback: title case the user input
-    return fallback.title()
+@app.post("/login")
+async def login(username: str, password: str, session):
+    async with httpx.AsyncClient() as client:
+        try:
+            resp = await client.post(f"{API_BASE_URL}/auth/login", data={"username": username, "password": password})
+            if resp.status_code == 200:
+                data = resp.json()
+                session["access_token"] = data["access_token"]
+                return RedirectResponse("/", status_code=303)
+            return error_message("Invalid email or password")
+        except Exception as e:
+            return error_message(f"Login failed: {str(e)}")
 
+@app.get("/register")
+def register_page(session):
+    if "access_token" in session: return RedirectResponse("/")
+    return Title("Register - Fitted"), Body(
+        nav_bar(session),
+        Div(
+            H2("Create Account"),
+            Form(
+                Input(type="text", name="full_name", placeholder="Full Name", required=True),
+                Input(type="email", name="email", placeholder="Email", required=True),
+                Input(type="password", name="password", placeholder="Password", required=True),
+                Button("Register", type="submit"),
+                hx_post="/register", hx_target="body",
+                cls="auth-form"
+            ),
+            Div("Already have an account? ", A("Login here", href="/login"), cls="auth-link"),
+            cls="container"
+        )
+    )
+
+@app.post("/register")
+async def register(full_name: str, email: str, password: str, session):
+    async with httpx.AsyncClient() as client:
+        try:
+            resp = await client.post(f"{API_BASE_URL}/auth/register", json={"full_name": full_name, "email": email, "password": password})
+            if resp.status_code == 200:
+                return RedirectResponse("/login", status_code=303)
+            err = resp.json().get("detail", "Registration failed")
+            return error_message(err)
+        except Exception as e:
+            return error_message(f"Registration failed: {str(e)}")
+
+@app.get("/logout")
+def logout(session):
+    session.pop("access_token", None)
+    return RedirectResponse("/login")
 
 @app.post("/get-outfit")
-async def get_outfit(location: str):
-    """Fetch weather and outfit suggestion from the API."""
-    if not location or not location.strip():
-        return error_message("Please enter a location.")
-
+async def get_outfit(location: str, session):
+    if not location or not location.strip(): return error_message("Please enter a location.")
     location = location.strip()
+    headers = {}
+    if "access_token" in session:
+        headers["Authorization"] = f"Bearer {session['access_token']}"
 
     try:
         async with httpx.AsyncClient() as client:
             url = f"{API_BASE_URL}/suggest-outfit"
-            response = await client.post(
-                url, params={"location": location}, timeout=30.0
-            )
-
-            # Try with trailing slash if 404
+            response = await client.post(url, params={"location": location}, headers=headers, timeout=30.0)
             if response.status_code == 404:
-                url = f"{API_BASE_URL}/suggest-outfit/"
-                response = await client.post(
-                    url, params={"location": location}, timeout=30.0
-                )
-
+                response = await client.post(f"{url}/", params={"location": location}, headers=headers, timeout=30.0)
             if response.status_code != 200:
-                try:
-                    error_detail = response.json().get("detail", "Unknown error")
-                except Exception:
-                    error_detail = response.text
-                return error_message(f"Error: {error_detail}")
-
+                err = response.json().get("detail", "Unknown error")
+                return error_message(f"Error: {err}")
+            
             data = response.json()
             weather_data = data.get("weather", {})
             location_info = weather_data.get("location", {})
             weather = weather_data.get("current", {})
             forecast = weather_data.get("forecast")[0]
-            print(forecast)
-            print(weather)
             outfit = data.get("outfit_suggestion", {})
-
-            display_location = format_location(location_info, location)
-
+            
+            parts = [location_info.get("name"), location_info.get("region"), location_info.get("country")]
+            display_location = ", ".join(p for p in parts if p) or location.title()
             return weather_results(display_location, weather, forecast, outfit)
-
-    except httpx.TimeoutException:
-        return error_message("Request timed out. Please try again.")
     except Exception as e:
         return error_message(f"Connection error: {str(e)}")
 
-
-# Lambda handler for AWS deployment
-# Disable lifespan to avoid startup/shutdown timeouts in Lambda
 handler = Mangum(app, lifespan="off")
-
 
 if __name__ == "__main__":
     import uvicorn
-
     uvicorn.run(app, host="0.0.0.0", port=5001)

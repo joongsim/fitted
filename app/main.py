@@ -3,13 +3,21 @@ from datetime import datetime
 from typing import Optional
 import boto3
 import os
-from fastapi import FastAPI, HTTPException, Query
+import logging
+
+from fastapi import FastAPI, HTTPException, Query, Depends, Response, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import OAuth2PasswordRequestForm
 from mangum import Mangum
+
+logger = logging.getLogger(__name__)
 from app.services import weather_service
 from app.services import llm_service
 from app.core.config import config
 from app.services import analysis_service
+from app.services import user_service
+from app.core import auth
+from app.models.user import UserCreate, User, Token
 
 from contextlib import asynccontextmanager
 from app.services import db_service
@@ -40,6 +48,104 @@ handler = Mangum(app, lifespan="off", api_gateway_base_path="/")
 @app.get("/")
 def read_root():
     return {"message": "Welcome to the Fitted Wardrobe Assistant!"}
+
+# --- Authentication Endpoints ---
+
+@app.post("/auth/register", response_model=User)
+async def register(user_in: UserCreate):
+    """Register a new user."""
+    # Check if user already exists
+    existing_user = await user_service.get_user_by_email(user_in.email)
+    if existing_user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="User with this email already exists",
+        )
+    
+    user = await user_service.create_user(user_in)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to create user",
+        )
+    return user
+
+@app.post("/auth/login", response_model=Token)
+async def login(
+    response: Response,
+    form_data: OAuth2PasswordRequestForm = Depends()
+):
+    """
+    Login user and set HTTP-only cookie.
+    Accepts standard OAuth2 form data (username/password).
+    """
+    user = await user_service.get_user_by_email(form_data.username)
+    if not user or not auth.verify_password(form_data.password, user["hashed_password"]):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect email or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    if not user["is_active"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Inactive user",
+        )
+
+    # Create access token
+    access_token = auth.create_access_token(data={"sub": str(user["user_id"])})
+    
+    # Set HTTP-only cookie for browser/FastHTML
+    # secure=False for now since we are on HTTP (no SSL yet)
+    response.set_cookie(
+        key="access_token",
+        value=access_token,
+        httponly=True,
+        max_age=config.access_token_expire_minutes * 60,
+        expires=config.access_token_expire_minutes * 60,
+        samesite="lax",
+        secure=False 
+    )
+    
+    # Update last login
+    await user_service.update_last_login(str(user["user_id"]))
+    
+    return {"access_token": access_token, "token_type": "bearer"}
+
+@app.post("/auth/logout")
+async def logout(response: Response):
+    """Logout user by clearing the auth cookie."""
+    response.delete_cookie("access_token")
+    return {"message": "Successfully logged out"}
+
+# --- User Profile Endpoints ---
+
+@app.get("/users/me", response_model=User)
+async def get_me(user_id: str = Depends(auth.get_current_user_id)):
+    """Get current user profile."""
+    user = await user_service.get_user_by_id(user_id)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
+    return user
+
+@app.get("/users/me/preferences")
+async def get_my_preferences(user_id: str = Depends(auth.get_current_user_id)):
+    """Get current user style and size preferences."""
+    return await user_service.get_user_preferences(user_id)
+
+@app.patch("/users/me/preferences")
+async def update_my_preferences(
+    style_prefs: Optional[dict] = None,
+    size_info: Optional[dict] = None,
+    user_id: str = Depends(auth.get_current_user_id)
+):
+    """Update current user style or size preferences."""
+    await user_service.update_user_preferences(user_id, style_prefs, size_info)
+    return {"message": "Preferences updated successfully"}
 
 @app.get("/debug/config")
 def debug_config():
@@ -159,7 +265,7 @@ async def analyze_weather(bucket: Optional[str] = None, key: Optional[str] = Non
             # Get the most recent file
             latest_file = sorted(response['Contents'], key=lambda x: x['LastModified'], reverse=True)[0]
             key = latest_file['Key']
-            print(f"Found latest weather file: {key}")
+            logger.info("Found latest weather file: %s", key)
             
         except Exception as e:
             if isinstance(e, HTTPException):
