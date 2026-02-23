@@ -1,15 +1,18 @@
 [Unit]
 Description=Fitted FastAPI Backend
 After=network.target
+StartLimitIntervalSec=120
+StartLimitBurst=5
 
 [Service]
 User=ec2-user
 WorkingDirectory=/home/ec2-user/fitted
 ExecStart=/home/ec2-user/fitted/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
-Restart=always
-RestartSec=5
+Restart=on-failure
+RestartSec=10
 Environment="USE_SSM=true"
-Environment="WEATHER_BUCKET_NAME=fitted-weather-data-dev"
+Environment="AWS_DEFAULT_REGION=us-west-1"
+Environment="WEATHER_BUCKET_NAME=fitted-weather-data-fitted-wardrobe-dev-903558039846"
 
 [Install]
 WantedBy=multi-user.target
