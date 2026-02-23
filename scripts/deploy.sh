@@ -32,24 +32,6 @@ uv pip install -r requirements-ec2.txt --quiet
 # NOTE: Database migrations are intentionally excluded from automated deploy.
 # Run manually when needed: ./.venv/bin/python scripts/db_migrate.py
 
-# Write env file from CloudFormation stack outputs
-echo "☁️  Fetching stack outputs from CloudFormation..."
-STACK_NAME="fitted-wardrobe-dev"
-WEATHER_BUCKET=$(aws cloudformation describe-stacks \
-    --stack-name "$STACK_NAME" \
-    --region us-west-1 \
-    --query "Stacks[0].Outputs[?OutputKey=='WeatherBucket'].OutputValue" \
-    --output text)
-
-if [ -z "$WEATHER_BUCKET" ]; then
-    echo "ERROR: Could not fetch WeatherBucket from CloudFormation stack '$STACK_NAME'" >&2
-    exit 1
-fi
-
-echo "Writing /etc/fitted/env (WEATHER_BUCKET_NAME=$WEATHER_BUCKET)..."
-sudo mkdir -p /etc/fitted
-printf 'WEATHER_BUCKET_NAME=%s\n' "$WEATHER_BUCKET" | sudo tee /etc/fitted/env > /dev/null
-
 # Sync systemd service files
 echo "⚙️  Syncing systemd service files..."
 sudo cp "$PROJECT_DIR/infra/systemd/fitted-backend.service" /etc/systemd/system/

@@ -81,6 +81,7 @@ class Config:
     def weather_bucket_name(self) -> str:
         """Get Weather Data S3 bucket name from environment (injected by SAM template)."""
         value = os.environ.get("WEATHER_BUCKET_NAME")
+        print(f"WEATHER_BUCKET_NAME: {value}")
         if not value:
             raise ValueError("WEATHER_BUCKET_NAME environment variable is not set")
         return value
