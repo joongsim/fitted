@@ -12,7 +12,7 @@ Restart=on-failure
 RestartSec=10
 Environment="USE_SSM=true"
 Environment="AWS_DEFAULT_REGION=us-west-1"
-Environment="WEATHER_BUCKET_NAME=fitted-weather-data-dev"
+EnvironmentFile=/etc/fitted/env
 
 [Install]
 WantedBy=multi-user.target
