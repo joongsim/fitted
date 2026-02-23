@@ -10,6 +10,7 @@ ExecStart=/home/ec2-user/fitted/.venv/bin/uvicorn app:app --host 127.0.0.1 --por
 Restart=always
 RestartSec=5
 Environment="USE_SSM=true"
+Environment="AWS_DEFAULT_REGION=us-west-1"
 Environment="API_BASE_URL=http://localhost:8000"
 
 [Install]
