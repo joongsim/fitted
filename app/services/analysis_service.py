@@ -59,6 +59,7 @@ class AthenaQueryService:
             
             query_execution_id = response['QueryExecutionId']
             logger.info("Started Athena query: %s", query_execution_id)
+            logger.debug("Athena query SQL: %.500s", query.strip())
 
             if wait:
                 self._wait_for_query(query_execution_id)
@@ -66,29 +67,42 @@ class AthenaQueryService:
             return query_execution_id
 
         except Exception as e:
-            logger.error("Error executing Athena query: %s", e)
+            logger.error("Error executing Athena query: %s", e, exc_info=True)
             raise
     
     def _wait_for_query(self, query_execution_id: str, max_wait: int = 60) -> str:
         """Wait for query to complete, checking every 1 second."""
         start_time = time.time()
-        
+
         while time.time() - start_time < max_wait:
             response = self.athena_client.get_query_execution(
                 QueryExecutionId=query_execution_id
             )
-            
+
             status = response['QueryExecution']['Status']['State']
-            
+
             if status == 'SUCCEEDED':
-                logger.info("Query %s succeeded", query_execution_id)
+                elapsed = time.time() - start_time
+                logger.info(
+                    "Athena query %s succeeded in %.1fs", query_execution_id, elapsed
+                )
                 return status
             elif status in ['FAILED', 'CANCELLED']:
-                reason = response['QueryExecution']['Status'].get('StateChangeReason', 'Unknown')
+                elapsed = time.time() - start_time
+                reason = response['QueryExecution']['Status'].get(
+                    'StateChangeReason', 'Unknown'
+                )
+                logger.error(
+                    "Athena query %s %s after %.1fs: %s",
+                    query_execution_id,
+                    status,
+                    elapsed,
+                    reason,
+                )
                 raise Exception(f"Query {status}: {reason}")
-            
+
             time.sleep(1)
-        
+
         raise TimeoutError(f"Query {query_execution_id} timed out after {max_wait}s")
     
     def get_query_results(self, query_execution_id: str) -> List[Dict[str, Any]]:
@@ -122,7 +136,7 @@ class AthenaQueryService:
             return results
             
         except Exception as e:
-            logger.error("Error getting query results: %s", e)
+            logger.error("Error getting query results: %s", e, exc_info=True)
             raise
     
     def query_and_get_results(self, query: str) -> List[Dict[str, Any]]:
@@ -177,7 +191,7 @@ def query_weather_by_temperature(min_temp: float = 15.0,
         logger.info("Found %d locations with temp > %s°C", len(results), min_temp)
         return results
     except Exception as e:
-        logger.error("Error querying weather data: %s", e)
+        logger.error("Error querying weather data: %s", e, exc_info=True)
         raise
 
 
@@ -217,7 +231,7 @@ def get_location_weather_trend(location: str, days: int = 7) -> List[Dict[str, A
         logger.info("Retrieved %d days of weather data for %s", len(results), location)
         return results
     except Exception as e:
-        logger.error("Error querying location trend: %s", e)
+        logger.error("Error querying location trend: %s", e, exc_info=True)
         raise
 
 
@@ -254,7 +268,7 @@ def get_weather_analytics_summary(date: Optional[str] = None) -> Dict[str, Any]:
             return summary
         return {}
     except Exception as e:
-        logger.error("Error getting analytics summary: %s", e)
+        logger.error("Error getting analytics summary: %s", e, exc_info=True)
         raise
 
 
@@ -290,7 +304,7 @@ def get_weather_by_condition(condition: str, date: Optional[str] = None) -> List
         logger.info("Found %d locations with condition: %s", len(results), condition)
         return results
     except Exception as e:
-        logger.error("Error querying by condition: %s", e)
+        logger.error("Error querying by condition: %s", e, exc_info=True)
         raise
 
 
@@ -323,5 +337,5 @@ def query_weather_file(bucket: str, key: str):
             )
 
     except Exception as e:
-        logger.error("Error querying file: %s", e)
+        logger.error("Error querying file: %s", e, exc_info=True)
         raise e
