@@ -12,6 +12,7 @@ docs/private/
 .cursor/
 .claude/
 CLAUDE.md
+archive/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
