@@ -4,13 +4,13 @@ from typing import Optional
 import boto3
 import os
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Query, Depends, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordRequestForm
 from mangum import Mangum
 
-logger = logging.getLogger(__name__)
 from app.services import weather_service
 from app.services import llm_service
 from app.core.config import config
@@ -18,9 +18,9 @@ from app.services import analysis_service
 from app.services import user_service
 from app.core import auth
 from app.models.user import UserCreate, User, Token
-
-from contextlib import asynccontextmanager
 from app.services import db_service
+
+logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

@@ -21,16 +21,14 @@ class Config:
 
     def __init__(self) -> None:
         self._ssm_client = None
-        self._use_ssm = (
-            os.environ.get("AWS_EXECUTION_ENV") is not None
-            or os.environ.get("USE_SSM", "false").lower() == "true"
-        )
-
+        self._use_ssm = os.environ.get("USE_SSM", "true").lower() != "false"
+        
     @property
     def ssm_client(self):
         """Lazy-load SSM client."""
         if self._ssm_client is None:
-            self._ssm_client = boto3.client("ssm")
+            region = os.environ.get("AWS_DEFAULT_REGION") or os.environ.get("AWS_REGION", "us-west-1")
+            self._ssm_client = boto3.client("ssm", region_name=region)
         return self._ssm_client
 
     @lru_cache(maxsize=32)
@@ -96,8 +94,12 @@ class Config:
 
     @property
     def weather_bucket_name(self) -> str:
-        """Get Weather Data S3 bucket name."""
-        return os.environ.get("WEATHER_BUCKET_NAME")
+        """Get Weather Data S3 bucket name from environment (injected by SAM template)."""
+        value = os.environ.get("WEATHER_BUCKET_NAME")
+        print(f"WEATHER_BUCKET_NAME: {value}")
+        if not value:
+            raise ValueError("WEATHER_BUCKET_NAME environment variable is not set")
+        return value
 
     @property
     def jwt_secret_key(self) -> str:
