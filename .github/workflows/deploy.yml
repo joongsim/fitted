@@ -69,3 +69,54 @@ jobs:
             --no-confirm-changeset \
             --no-fail-on-empty-changeset \
             --resolve-s3
+
+      - name: Deploy to EC2 via SSM
+        # Requires the github_actions IAM role to have:
+        #   ssm:SendCommand on the target instance
+        #   ssm:GetCommandInvocation on the target instance
+        run: |
+          BRANCH="${{ github.ref_name }}"
+          if [[ ! "$BRANCH" =~ ^[a-zA-Z0-9/_.-]+$ ]]; then
+            echo "Invalid branch name: $BRANCH"
+            exit 1
+          fi
+
+          COMMAND_ID=$(aws ssm send-command \
+            --region us-west-1 \
+            --instance-ids "${{ secrets.EC2_INSTANCE_ID }}" \
+            --document-name "AWS-RunShellScript" \
+            --parameters "commands=[\"runuser -l ec2-user -c 'cd /home/ec2-user/fitted && ./scripts/deploy.sh $BRANCH'\"]" \
+            --query 'Command.CommandId' \
+            --output text)
+
+          echo "SSM Command ID: $COMMAND_ID"
+
+          aws ssm wait command-executed \
+            --region us-west-1 \
+            --command-id "$COMMAND_ID" \
+            --instance-id "${{ secrets.EC2_INSTANCE_ID }}"
+
+          STATUS=$(aws ssm get-command-invocation \
+            --region us-west-1 \
+            --command-id "$COMMAND_ID" \
+            --instance-id "${{ secrets.EC2_INSTANCE_ID }}" \
+            --query 'Status' \
+            --output text)
+
+          aws ssm get-command-invocation \
+            --region us-west-1 \
+            --command-id "$COMMAND_ID" \
+            --instance-id "${{ secrets.EC2_INSTANCE_ID }}" \
+            --query 'StandardOutputContent' \
+            --output text
+
+          if [ "$STATUS" != "Success" ]; then
+            echo "--- STDERR ---"
+            aws ssm get-command-invocation \
+              --region us-west-1 \
+              --command-id "$COMMAND_ID" \
+              --instance-id "${{ secrets.EC2_INSTANCE_ID }}" \
+              --query 'StandardErrorContent' \
+              --output text
+            exit 1
+          fi

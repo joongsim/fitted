@@ -29,14 +29,8 @@ uv venv --python 3.11 --quiet
 source .venv/bin/activate
 uv pip install -r requirements-ec2.txt --quiet
 
-# Run database migrations
-echo "🗄️ Running database migrations..."
-# Load environment variables from .env if it exists
-if [ -f ".env" ]; then
-    export $(grep -v '^#' .env | xargs)
-fi
-
-./.venv/bin/python scripts/db_migrate.py
+# NOTE: Database migrations are intentionally excluded from automated deploy.
+# Run manually when needed: ./.venv/bin/python scripts/db_migrate.py
 
 # Restart services
 echo "🔄 Restarting systemd services..."
