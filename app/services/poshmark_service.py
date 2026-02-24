@@ -147,7 +147,7 @@ async def search_listings(
         category: Optional Poshmark category filter (e.g. 'Tops').
         department: Optional department filter ('Men' | 'Women' | 'Kids').
         size: Optional size filter.
-        sort_by: Optional sort order (e.g. 'relevance_v2', 'price_asc', 'price_desc').
+        sort_by: Optional sort order sent as 'sort' param (e.g. 'popularity', 'price_asc', 'price_desc').
         page: Page number (1-indexed).
 
     Returns:
@@ -161,7 +161,7 @@ async def search_listings(
     if size:
         params["size"] = size
     if sort_by:
-        params["sort_by"] = sort_by
+        params["sort"] = sort_by
 
     headers = _build_headers(api_key)
 
