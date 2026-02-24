@@ -1,4 +1,5 @@
 """Configuration management using AWS SSM Parameter Store."""
+
 import logging
 import os
 from functools import lru_cache
@@ -22,12 +23,14 @@ class Config:
     def __init__(self) -> None:
         self._ssm_client = None
         self._use_ssm = os.environ.get("USE_SSM", "true").lower() != "false"
-        
+
     @property
     def ssm_client(self):
         """Lazy-load SSM client."""
         if self._ssm_client is None:
-            region = os.environ.get("AWS_DEFAULT_REGION") or os.environ.get("AWS_REGION", "us-west-1")
+            region = os.environ.get("AWS_DEFAULT_REGION") or os.environ.get(
+                "AWS_REGION", "us-west-1"
+            )
             self._ssm_client = boto3.client("ssm", region_name=region)
         return self._ssm_client
 
@@ -102,6 +105,11 @@ class Config:
         return value
 
     @property
+    def rapidapi_key(self) -> str:
+        """Get RapidAPI key for Poshmark API access."""
+        return self.get_parameter("/fitted/rapidapi-key")
+
+    @property
     def jwt_secret_key(self) -> str:
         """Get JWT secret key."""
         return self.get_parameter(
@@ -117,9 +125,7 @@ class Config:
     def access_token_expire_minutes(self) -> int:
         """Get access token expiration in minutes."""
         return int(
-            self.get_parameter(
-                "/fitted/access-token-expire-minutes", default="1440"
-            )
+            self.get_parameter("/fitted/access-token-expire-minutes", default="1440")
         )  # 24 hours
 
 

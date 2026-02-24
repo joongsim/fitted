@@ -92,14 +92,56 @@ DROP TRIGGER IF EXISTS set_updated_at_prefs ON user_preferences;
 CREATE TRIGGER set_updated_at_prefs
     BEFORE UPDATE ON user_preferences
     FOR EACH ROW EXECUTE FUNCTION update_modified_column();
+
+-- Product catalog — Poshmark dev seed + future SerpAPI/production sources
+-- NOTE: VECTOR(512) for CLIP ViT-B/32 (512-dim).
+-- wardrobe_items currently uses VECTOR(384) — to be aligned in a future migration
+-- when the CLIP embedding service is deployed and wardrobe embeddings are backfilled
+-- (all embeddings are NULL today, so the ALTER COLUMN will be safe at that point).
+CREATE TABLE IF NOT EXISTS catalog_items (
+    item_id       VARCHAR PRIMARY KEY,           -- Poshmark listing ID
+    domain        VARCHAR NOT NULL DEFAULT 'fashion',
+    title         TEXT,
+    price         FLOAT,
+    image_url     TEXT,                          -- S3 URL after image copy
+    product_url   TEXT,
+    source        VARCHAR,                       -- 'poshmark_seed' | 'serpapi' | ...
+    embedding     VECTOR(512),                   -- NULL until CLIP service is built
+    content_hash  VARCHAR,                       -- SHA-256 of title:price:brand:category
+    attributes    JSONB DEFAULT '{}',            -- brand, size, condition, colors, etc.
+    first_seen    TIMESTAMPTZ DEFAULT NOW(),
+    last_seen     TIMESTAMPTZ DEFAULT NOW(),
+    hit_count     INT DEFAULT 1,
+    model_version VARCHAR
+);
+
+-- HNSW index for vector similarity search (works on empty tables + NULL embeddings)
+CREATE INDEX IF NOT EXISTS idx_catalog_embedding
+    ON catalog_items USING hnsw (embedding vector_cosine_ops);
+
+-- Indexes for common filter patterns used in candidate retrieval
+CREATE INDEX IF NOT EXISTS idx_catalog_source
+    ON catalog_items(source);
+
+CREATE INDEX IF NOT EXISTS idx_catalog_domain
+    ON catalog_items(domain);
+
+-- GIN index for JSONB attribute queries (e.g., filter by brand, category, size)
+CREATE INDEX IF NOT EXISTS idx_catalog_attributes
+    ON catalog_items USING gin (attributes);
+
+-- Content hash index for deduplication queries
+CREATE INDEX IF NOT EXISTS idx_catalog_content_hash
+    ON catalog_items(content_hash);
 """
+
 
 def migrate():
     if not DATABASE_URL:
         print("Error: DATABASE_URL environment variable not set.")
         return
 
-    print(f"Connecting to database...")
+    print("Connecting to database...")
     try:
         with psycopg.connect(DATABASE_URL) as conn:
             with conn.cursor() as cur:
@@ -109,6 +151,7 @@ def migrate():
                 print("Migration successful.")
     except Exception as e:
         print(f"Migration failed: {e}")
+
 
 if __name__ == "__main__":
     migrate()
