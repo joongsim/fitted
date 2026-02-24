@@ -1,4 +1,5 @@
 """Shared fixtures and test data for the Fitted test suite."""
+
 import pytest
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
@@ -107,6 +108,51 @@ MOCK_PREFERENCES = {
     "size_info": {"shirt": "M", "pants": "32"},
 }
 
+MOCK_POSHMARK_LISTING = {
+    "id": "abc123def456",
+    "title": "Zara Oxford Shirt Men",
+    "description": "Great condition Oxford shirt, worn twice.",
+    "price_amount": {"val": "35.00"},
+    "original_price_amount": {"val": "79.99"},
+    "condition": "nwt",
+    "brand": "Zara",
+    "size": "M",
+    "colors": ["white", "blue"],
+    "category": "Tops",
+    "department": "Men",
+    "cover_shot": {
+        "url_small": "https://di2ponv0v5otw.cloudfront.net/posts/2024/01/01/small.jpg",
+        "url_large": "https://di2ponv0v5otw.cloudfront.net/posts/2024/01/01/large.jpg",
+    },
+    "seller": {"username": "fashion_seller", "seller_rating": 4.8},
+}
+
+MOCK_POSHMARK_LISTING_POOR = {
+    **MOCK_POSHMARK_LISTING,
+    "id": "xyz789poor",
+    "condition": "poor",
+}
+
+MOCK_POSHMARK_LISTING_NO_TITLE = {
+    **MOCK_POSHMARK_LISTING,
+    "id": "notitle123",
+    "title": None,
+}
+
+MOCK_POSHMARK_LISTING_NO_COVER = {
+    **MOCK_POSHMARK_LISTING,
+    "id": "nocover456",
+    "cover_shot": None,
+}
+
+MOCK_POSHMARK_LISTING_LOW_PRICE = {
+    **MOCK_POSHMARK_LISTING,
+    "id": "cheap789",
+    "price_amount": {"val": "1.00"},
+}
+
+MOCK_S3_BUCKET = "fitted-weather-data-test-123456789"
+
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -135,6 +181,7 @@ def mock_weather_data():
 def mock_forecast_data():
     """Standard mock forecast API response dict."""
     import copy
+
     return copy.deepcopy(MOCK_FORECAST_DATA)
 
 
@@ -148,6 +195,7 @@ def mock_outfit():
 def mock_preferences():
     """Standard mock user preferences dict."""
     import copy
+
     return copy.deepcopy(MOCK_PREFERENCES)
 
 
@@ -178,6 +226,7 @@ def patch_config_get_parameter():
             "/fitted/openrouter-api-key": "fake-openrouter-key",
             "/fitted/weather-api-key": "fake-weather-key",
             "/fitted/database-url": "postgresql://user:pass@localhost/fitted",
+            "/fitted/rapidapi-key": "fake-rapidapi-key",
         }
         if name in defaults:
             return defaults[name]
