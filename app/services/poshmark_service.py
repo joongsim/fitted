@@ -131,6 +131,7 @@ async def search_listings(
     category: Optional[str] = None,
     department: Optional[str] = None,
     size: Optional[str] = None,
+    sort_by: Optional[str] = None,
     page: int = 1,
 ) -> list[PoshmarkListingRaw]:
     """
@@ -146,6 +147,7 @@ async def search_listings(
         category: Optional Poshmark category filter (e.g. 'Tops').
         department: Optional department filter ('Men' | 'Women' | 'Kids').
         size: Optional size filter.
+        sort_by: Optional sort order (e.g. 'relevance_v2', 'price_asc', 'price_desc').
         page: Page number (1-indexed).
 
     Returns:
@@ -158,6 +160,8 @@ async def search_listings(
         params["department"] = department
     if size:
         params["size"] = size
+    if sort_by:
+        params["sort_by"] = sort_by
 
     headers = _build_headers(api_key)
 

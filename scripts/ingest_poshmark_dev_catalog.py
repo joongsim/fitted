@@ -40,7 +40,6 @@ import logging
 import os
 import pathlib
 import sys
-import time
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -64,44 +63,35 @@ logging.basicConfig(
 logger = logging.getLogger("ingest_poshmark")
 
 # ---------------------------------------------------------------------------
-# Query list — men's fashion, 5 categories, 25 queries
+# Query list — men's fashion, 5 categories, 20 queries
 # ---------------------------------------------------------------------------
 
 QUERY_LIST = [
-    # Men's — Tops
-    {"query": "oxford shirt men dress", "department": "Men", "category": "Tops"},
-    {"query": "henley shirt men casual", "department": "Men", "category": "Tops"},
-    {"query": "polo shirt men classic", "department": "Men", "category": "Tops"},
-    {"query": "graphic tee men streetwear", "department": "Men", "category": "Tops"},
-    {"query": "linen shirt men summer", "department": "Men", "category": "Tops"},
-    {"query": "flannel shirt men", "department": "Men", "category": "Tops"},
-    {"query": "cashmere sweater men luxury", "department": "Men", "category": "Tops"},
-    {"query": "crewneck sweatshirt men", "department": "Men", "category": "Tops"},
+    # Men's — Shirts
+    {"query": "graphic tee men streetwear", "department": "Men", "category": "Shirts"},
+    # {"query": "linen shirt men summer", "department": "Men", "category": "Shirts"},
+    # {"query": "cashmere sweater men luxury", "department": "Men", "category": "Shirts"},
+    # {"query": "crewneck sweatshirt men", "department": "Men", "category": "Shirts"},
     # Men's — Bottoms
-    {"query": "slim fit chinos men navy", "department": "Men", "category": "Bottoms"},
-    {"query": "raw denim jeans men", "department": "Men", "category": "Bottoms"},
-    {"query": "straight leg trousers men", "department": "Men", "category": "Bottoms"},
-    {"query": "cargo pants men", "department": "Men", "category": "Bottoms"},
-    {"query": "jogger pants men", "department": "Men", "category": "Bottoms"},
+    # {"query": "raw denim jeans men", "department": "Men", "category": "Bottoms"},
+    # {"query": "straight leg trousers men", "department": "Men", "category": "Bottoms"},
+    # {"query": "cargo pants men", "department": "Men", "category": "Bottoms"},
+    # {"query": "jogger pants men", "department": "Men", "category": "Bottoms"},
     # Men's — Outerwear
-    {
-        "query": "bomber jacket men varsity",
-        "department": "Men",
-        "category": "Jackets & Coats",
-    },
-    {"query": "blazer men suit", "department": "Men", "category": "Jackets & Coats"},
-    {"query": "trench coat men", "department": "Men", "category": "Jackets & Coats"},
-    {"query": "puffer jacket men", "department": "Men", "category": "Jackets & Coats"},
-    {"query": "denim jacket men", "department": "Men", "category": "Jackets & Coats"},
+    # {"query": "leather jacket men", "department": "Men", "category": "Jackets & Coats"},
+    # {"query": "blazer men suit", "department": "Men", "category": "Jackets & Coats"},
+    # {"query": "trench coat men", "department": "Men", "category": "Jackets & Coats"},
+    # {"query": "puffer jacket men", "department": "Men", "category": "Jackets & Coats"},
+    # {"query": "denim jacket men", "department": "Men", "category": "Jackets & Coats"},
     # Men's — Shoes
-    {"query": "chelsea boots men leather", "department": "Men", "category": "Shoes"},
-    {"query": "white sneakers men clean", "department": "Men", "category": "Shoes"},
-    {"query": "loafers men dress", "department": "Men", "category": "Shoes"},
-    {"query": "running shoes men", "department": "Men", "category": "Shoes"},
-    {"query": "boots men work", "department": "Men", "category": "Shoes"},
+    # {"query": "chelsea boots men leather", "department": "Men", "category": "Shoes"},
+    # {"query": "white sneakers men clean", "department": "Men", "category": "Shoes"},
+    # {"query": "loafers men dress", "department": "Men", "category": "Shoes"},
+    # {"query": "running shoes men", "department": "Men", "category": "Shoes"},
+    # {"query": "boots men work", "department": "Men", "category": "Shoes"},
     # Men's — Bags & Accessories
-    {"query": "backpack men leather", "department": "Men", "category": "Bags"},
-    {"query": "tote bag men canvas", "department": "Men", "category": "Bags"},
+    # {"query": "backpack men leather", "department": "Men", "category": "Bags"},
+    # {"query": "tote bag men canvas", "department": "Men", "category": "Bags"},
 ]
 
 # ---------------------------------------------------------------------------
@@ -270,6 +260,7 @@ async def ingest(args: argparse.Namespace) -> None:
     total_inserted = state.get("total_inserted", 0)
     total_updated = state.get("total_updated", 0)
     total_failed_images = 0
+    total_dry_run_count = 0  # tracks would-be upserts in --dry-run mode
 
     try:
         for query_spec in QUERY_LIST:
@@ -296,6 +287,7 @@ async def ingest(args: argparse.Namespace) -> None:
                         api_key,
                         category=category,
                         department=department,
+                        sort_by="relevance_v2",
                         page=page,
                     )
                 except Exception:
@@ -347,9 +339,19 @@ async def ingest(args: argparse.Namespace) -> None:
                 )
 
                 if args.dry_run:
-                    logger.info("[DRY RUN] Would upsert %d items", len(parsed_items))
+                    total_dry_run_count += len(parsed_items)
+                    logger.info(
+                        "[DRY RUN] Would upsert %d items (running total: %d)",
+                        len(parsed_items),
+                        total_dry_run_count,
+                    )
                     completed_set.add(page_key)
                     state["completed_pages"].append(list(page_key))
+                    if args.max_listings and total_dry_run_count >= args.max_listings:
+                        logger.info(
+                            "Reached --max-listings=%d — stopping", args.max_listings
+                        )
+                        return
                     continue
 
                 # Download images in parallel (bounded by semaphore)
@@ -371,7 +373,13 @@ async def ingest(args: argparse.Namespace) -> None:
                             )
                         )
                     else:
-                        image_tasks.append(asyncio.coroutine(lambda: None)())
+                        # Quality filter guarantees a cover URL exists, so this
+                        # branch is dead code — but kept as a safe no-op in case
+                        # that invariant ever changes.
+                        async def _no_image() -> None:
+                            return None
+
+                        image_tasks.append(_no_image())
 
                 image_urls = await asyncio.gather(*image_tasks, return_exceptions=False)
 
