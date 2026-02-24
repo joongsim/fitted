@@ -43,8 +43,10 @@ MAX_IMAGE_BYTES = 5 * 1024 * 1024  # 5 MB hard cap — protects EC2 memory + S3 
 def _build_headers(api_key: str) -> dict:
     """Build RapidAPI auth headers for Poshmark requests."""
     return {
-        "X-RapidAPI-Key": api_key,
-        "X-RapidAPI-Host": RAPIDAPI_HOST,
+        "x-rapidapi-key": api_key,
+        "x-rapidapi-host": RAPIDAPI_HOST,
+        "Accept-Encoding": "gzip, deflate",
+        "Content-Type": "application/json",
     }
 
 
@@ -153,7 +155,7 @@ async def search_listings(
     Returns:
         List of parsed listing objects (may be empty if no results or all filtered).
     """
-    params: dict = {"query": query, "page": page}
+    params: dict = {"query": query, "domain": "com", "page": page}
     if category:
         params["category"] = category
     if department:
