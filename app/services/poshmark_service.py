@@ -6,7 +6,7 @@ import logging
 import re
 from datetime import datetime, timezone
 from typing import Optional
-from urllib.parse import quote, urlparse
+from urllib.parse import urlparse
 
 import httpx
 
@@ -155,11 +155,9 @@ async def search_listings(
     Returns:
         List of parsed listing objects (may be empty if no results or all filtered).
     """
-    # Encode query with %20 (not +) to match the API's expected format
-    encoded_query = quote(query, safe="")
-    base_url = f"{BASE_URL}/search?query={encoded_query}"
-
-    params: dict = {"domain": "com", "page": page}
+    # httpx replaces any query string embedded in the URL when params= is used,
+    # so query must live in the params dict. httpx uses %20 for spaces by default.
+    params: dict = {"query": query, "domain": "com", "page": page}
     if category:
         params["category"] = category
     if department:
@@ -175,10 +173,12 @@ async def search_listings(
         try:
             async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
                 response = await client.get(
-                    base_url,
+                    f"{BASE_URL}/search",
                     params=params,
                     headers=headers,
                 )
+
+            logger.info("API request: %s", response.request.url)
 
             if response.status_code == 429 and attempt < MAX_RETRIES - 1:
                 delay = RETRY_DELAYS[attempt]
@@ -210,13 +210,12 @@ async def search_listings(
             logger.error("Unexpected error calling Poshmark API", exc_info=True)
             raise
 
-        # Log response structure to help diagnose unexpected shapes
-        if isinstance(data, dict):
-            logger.debug("API response keys: %s", list(data.keys()))
-        elif isinstance(data, list):
-            logger.debug("API response: list of %d items", len(data))
-        else:
-            logger.debug("API response type: %s", type(data).__name__)
+        # Log raw response for debugging
+        logger.info(
+            "API response: status=%d body_preview=%s",
+            response.status_code,
+            response.text[:300],
+        )
 
         # Parse and validate each listing; skip malformed entries
         raw_listings = data if isinstance(data, list) else data.get("data", [])
