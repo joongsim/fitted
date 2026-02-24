@@ -68,30 +68,30 @@ logger = logging.getLogger("ingest_poshmark")
 
 QUERY_LIST = [
     # Men's — Shirts
-    {"query": "graphic tee men streetwear", "department": "Men", "category": "Tops"},
-    # {"query": "linen shirt men summer", "department": "Men", "category": "Tops"},
-    # {"query": "cashmere sweater men luxury", "department": "Men", "category": "Tops"},
-    # {"query": "crewneck sweatshirt men", "department": "Men", "category": "Tops"},
+    {"query": "graphic tee men streetwear"},
+    # {"query": "linen shirt men summer"},
+    # {"query": "cashmere sweater men luxury"},
+    # {"query": "crewneck sweatshirt men"},
     # Men's — Bottoms
-    # {"query": "raw denim jeans men", "department": "Men", "category": "Bottoms"},
-    # {"query": "straight leg trousers men", "department": "Men", "category": "Bottoms"},
-    # {"query": "cargo pants men", "department": "Men", "category": "Bottoms"},
-    # {"query": "jogger pants men", "department": "Men", "category": "Bottoms"},
+    # {"query": "raw denim jeans men"},
+    # {"query": "straight leg trousers men"},
+    # {"query": "cargo pants men"},
+    # {"query": "jogger pants men"},
     # Men's — Outerwear
-    # {"query": "leather jacket men", "department": "Men", "category": "Jackets & Coats"},
-    # {"query": "blazer men suit", "department": "Men", "category": "Jackets & Coats"},
-    # {"query": "trench coat men", "department": "Men", "category": "Jackets & Coats"},
-    # {"query": "puffer jacket men", "department": "Men", "category": "Jackets & Coats"},
-    # {"query": "denim jacket men", "department": "Men", "category": "Jackets & Coats"},
+    # {"query": "leather jacket men"},
+    # {"query": "blazer men suit"},
+    # {"query": "trench coat men"},
+    # {"query": "puffer jacket men"},
+    # {"query": "denim jacket men"},
     # Men's — Shoes
-    # {"query": "chelsea boots men leather", "department": "Men", "category": "Shoes"},
-    # {"query": "white sneakers men clean", "department": "Men", "category": "Shoes"},
-    # {"query": "loafers men dress", "department": "Men", "category": "Shoes"},
-    # {"query": "running shoes men", "department": "Men", "category": "Shoes"},
-    # {"query": "boots men work", "department": "Men", "category": "Shoes"},
+    # {"query": "chelsea boots men leather"},
+    # {"query": "white sneakers men clean"},
+    # {"query": "loafers men dress"},
+    # {"query": "running shoes men"},
+    # {"query": "boots men work"},
     # Men's — Bags & Accessories
-    # {"query": "backpack men leather", "department": "Men", "category": "Bags"},
-    # {"query": "tote bag men canvas", "department": "Men", "category": "Bags"},
+    # {"query": "backpack men leather"},
+    # {"query": "tote bag men canvas"},
 ]
 
 # ---------------------------------------------------------------------------
@@ -265,12 +265,8 @@ async def ingest(args: argparse.Namespace) -> None:
     try:
         for query_spec in QUERY_LIST:
             query = query_spec["query"]
-            department = query_spec.get("department")
-            category = query_spec.get("category")
 
-            logger.info(
-                "=== Query: %r (dept=%s cat=%s) ===", query, department, category
-            )
+            logger.info("=== Query: %r ===", query)
 
             for page in range(1, args.max_pages_per_query + 1):
                 page_key = (query, page)
@@ -285,8 +281,6 @@ async def ingest(args: argparse.Namespace) -> None:
                     raw_listings = await search_listings(
                         query,
                         api_key,
-                        category=category,
-                        department=department,
                         sort_by="relevance_v2",
                         page=page,
                     )
