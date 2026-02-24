@@ -68,10 +68,10 @@ logger = logging.getLogger("ingest_poshmark")
 
 QUERY_LIST = [
     # Men's — Shirts
-    {"query": "graphic tee men streetwear", "department": "Men", "category": "Shirts"},
-    # {"query": "linen shirt men summer", "department": "Men", "category": "Shirts"},
-    # {"query": "cashmere sweater men luxury", "department": "Men", "category": "Shirts"},
-    # {"query": "crewneck sweatshirt men", "department": "Men", "category": "Shirts"},
+    {"query": "graphic tee men streetwear", "department": "Men", "category": "Tops"},
+    # {"query": "linen shirt men summer", "department": "Men", "category": "Tops"},
+    # {"query": "cashmere sweater men luxury", "department": "Men", "category": "Tops"},
+    # {"query": "crewneck sweatshirt men", "department": "Men", "category": "Tops"},
     # Men's — Bottoms
     # {"query": "raw denim jeans men", "department": "Men", "category": "Bottoms"},
     # {"query": "straight leg trousers men", "department": "Men", "category": "Bottoms"},
