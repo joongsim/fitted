@@ -281,7 +281,6 @@ async def ingest(args: argparse.Namespace) -> None:
                     raw_listings = await search_listings(
                         query,
                         api_key,
-                        sort_by="relevance_v2",
                         page=page,
                     )
                 except Exception:

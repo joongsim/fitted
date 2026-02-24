@@ -36,9 +36,10 @@ class PoshmarkListingRaw(BaseModel):
     condition: Optional[str] = None  # nwt | nwot | good | fair | poor
     brand: Optional[str] = None
     size: Optional[str] = None
-    colors: Optional[List[str]] = Field(default_factory=list)
+    size_obj: Optional[dict] = None  # {"id": "XL", "display": "XL", ...}
+    colors: Optional[List] = Field(default_factory=list)
     category: Optional[str] = None
-    department: Optional[str] = None  # Women | Men | Kids
+    department: Optional[object] = None  # str or dict depending on API response
     cover_shot: Optional[CoverShot] = None
     seller: Optional[dict] = None
 
@@ -55,16 +56,28 @@ class PoshmarkListingRaw(BaseModel):
 
         if self.brand is not None:
             attrs["brand"] = str(self.brand)[:255]
-        if self.size is not None:
-            attrs["size"] = str(self.size)[:50]
+        size = self.size or (
+            self.size_obj.get("display") if isinstance(self.size_obj, dict) else None
+        )
+        if size is not None:
+            attrs["size"] = str(size)[:50]
         if self.condition is not None:
             attrs["condition"] = str(self.condition)[:50]
         if self.colors:
-            attrs["colors"] = [str(c)[:50] for c in self.colors[:10]]
+            parsed_colors = []
+            for c in self.colors[:10]:
+                if isinstance(c, dict):
+                    parsed_colors.append(str(c.get("name", ""))[:50])
+                else:
+                    parsed_colors.append(str(c)[:50])
+            attrs["colors"] = [c for c in parsed_colors if c]
         if self.category is not None:
             attrs["category"] = str(self.category)[:100]
         if self.department is not None:
-            attrs["department"] = str(self.department)[:50]
+            if isinstance(self.department, dict):
+                attrs["department"] = str(self.department.get("display", ""))[:50]
+            else:
+                attrs["department"] = str(self.department)[:50]
         if self.description is not None:
             attrs["description"] = str(self.description)[:2000]
         if self.original_price_amount is not None:

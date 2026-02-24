@@ -6,7 +6,7 @@ import logging
 import re
 from datetime import datetime, timezone
 from typing import Optional
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 import httpx
 
@@ -66,7 +66,7 @@ def is_quality_listing(listing: PoshmarkListingRaw) -> bool:
     - Title must be a non-empty string of at least 3 characters
     - Cover shot must exist and have a url_small value
     """
-    if listing.condition not in ALLOWED_CONDITIONS:
+    if listing.condition is not None and listing.condition not in ALLOWED_CONDITIONS:
         return False
     if listing.price_amount is None:
         return False
@@ -155,7 +155,11 @@ async def search_listings(
     Returns:
         List of parsed listing objects (may be empty if no results or all filtered).
     """
-    params: dict = {"query": query, "domain": "com", "page": page}
+    # Encode query with %20 (not +) to match the API's expected format
+    encoded_query = quote(query, safe="")
+    base_url = f"{BASE_URL}/search?query={encoded_query}"
+
+    params: dict = {"domain": "com", "page": page}
     if category:
         params["category"] = category
     if department:
@@ -171,7 +175,7 @@ async def search_listings(
         try:
             async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
                 response = await client.get(
-                    f"{BASE_URL}/search",
+                    base_url,
                     params=params,
                     headers=headers,
                 )
@@ -206,8 +210,16 @@ async def search_listings(
             logger.error("Unexpected error calling Poshmark API", exc_info=True)
             raise
 
+        # Log response structure to help diagnose unexpected shapes
+        if isinstance(data, dict):
+            logger.debug("API response keys: %s", list(data.keys()))
+        elif isinstance(data, list):
+            logger.debug("API response: list of %d items", len(data))
+        else:
+            logger.debug("API response type: %s", type(data).__name__)
+
         # Parse and validate each listing; skip malformed entries
-        raw_listings = data if isinstance(data, list) else data.get("listings", [])
+        raw_listings = data if isinstance(data, list) else data.get("data", [])
         results: list[PoshmarkListingRaw] = []
         for raw in raw_listings:
             try:
