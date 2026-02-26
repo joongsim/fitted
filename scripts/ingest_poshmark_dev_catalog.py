@@ -69,29 +69,29 @@ logger = logging.getLogger("ingest_poshmark")
 QUERY_LIST = [
     # Men's — Shirts
     {"query": "graphic tee men streetwear"},
-    # {"query": "linen shirt men summer"},
-    # {"query": "cashmere sweater men luxury"},
-    # {"query": "crewneck sweatshirt men"},
+    {"query": "linen shirt men summer"},
+    {"query": "cashmere sweater men luxury"},
+    {"query": "crewneck sweatshirt men"},
     # Men's — Bottoms
-    # {"query": "raw denim jeans men"},
-    # {"query": "straight leg trousers men"},
-    # {"query": "cargo pants men"},
-    # {"query": "jogger pants men"},
+    {"query": "raw denim jeans men"},
+    {"query": "straight leg trousers men"},
+    {"query": "cargo pants men"},
+    {"query": "jogger pants men"},
     # Men's — Outerwear
-    # {"query": "leather jacket men"},
-    # {"query": "blazer men suit"},
-    # {"query": "trench coat men"},
-    # {"query": "puffer jacket men"},
-    # {"query": "denim jacket men"},
+    {"query": "leather jacket men"},
+    {"query": "blazer men suit"},
+    {"query": "trench coat men"},
+    {"query": "puffer jacket men"},
+    {"query": "denim jacket men"},
     # Men's — Shoes
-    # {"query": "chelsea boots men leather"},
-    # {"query": "white sneakers men clean"},
-    # {"query": "loafers men dress"},
-    # {"query": "running shoes men"},
-    # {"query": "boots men work"},
+    {"query": "chelsea boots men leather"},
+    {"query": "white sneakers men clean"},
+    {"query": "loafers men dress"},
+    {"query": "running shoes men"},
+    {"query": "boots men work"},
     # Men's — Bags & Accessories
-    # {"query": "backpack men leather"},
-    # {"query": "tote bag men canvas"},
+    {"query": "backpack men leather"},
+    {"query": "tote bag men canvas"},
 ]
 
 # ---------------------------------------------------------------------------
