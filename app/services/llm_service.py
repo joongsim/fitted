@@ -200,6 +200,146 @@ async def get_outfit_suggestion(
         return _get_fallback_suggestion(temp_c, condition, forecast is not None)
 
 
+async def generate_search_query(
+    preferences: dict,
+    weather: dict,
+) -> str:
+    """
+    Generate a product search query string from user preferences + weather context.
+
+    The returned string is short (5–10 words) and suitable for embedding and
+    passing to the catalog search. It is NOT a SQL query or a structured filter —
+    it is a natural-language description of what the user might want to wear.
+
+    Args:
+        preferences: User's style_preferences dict (colors, styles, occasions, avoid).
+        weather: Dict with temp_c, condition, and optionally location.
+
+    Returns:
+        A short query string, e.g. "navy chinos casual warm weather".
+        Falls back to a template string if the LLM call fails.
+    """
+    condition = weather.get("condition", "")
+    temp_c = weather.get("temp_c", 20)
+    styles = ", ".join(preferences.get("styles", ["casual"]))
+    colors = ", ".join(preferences.get("colors", []))
+    avoid = ", ".join(preferences.get("avoid", []))
+
+    prompt = (
+        f"Weather: {condition}, {temp_c}°C. "
+        f"User style: {styles}. "
+        + (f"Preferred colors: {colors}. " if colors else "")
+        + (f"Avoid: {avoid}. " if avoid else "")
+        + "Write a 5–10 word clothing search query for this person. "
+        "Only output the query, no explanation."
+    )
+
+    try:
+        client = get_client()
+        if not client:
+            return _fallback_search_query(preferences, weather)
+
+        logger.info(
+            "Generating search query via LLM: temp_c=%.1f condition=%s",
+            temp_c,
+            condition,
+        )
+        response = await client.chat.completions.create(
+            model=_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.3,
+            max_tokens=50,
+        )
+        query = response.choices[0].message.content.strip().strip('"').strip("'")
+        logger.info("Generated search query: %r", query)
+        return query
+
+    except Exception:
+        logger.error(
+            "LLM search query generation failed — using fallback", exc_info=True
+        )
+        return _fallback_search_query(preferences, weather)
+
+
+def _fallback_search_query(preferences: dict, weather: dict) -> str:
+    """
+    Rule-based search query fallback when the LLM is unavailable.
+
+    Args:
+        preferences: User's style_preferences dict.
+        weather: Dict with temp_c, condition.
+
+    Returns:
+        A simple template query string.
+    """
+    style = (
+        preferences.get("styles", ["casual"])[0]
+        if preferences.get("styles")
+        else "casual"
+    )
+    temp_c = weather.get("temp_c", 20)
+
+    if temp_c < 10:
+        weather_desc = "cold weather"
+    elif temp_c < 20:
+        weather_desc = "cool weather"
+    else:
+        weather_desc = "warm weather"
+
+    return f"{style} men clothing {weather_desc}"
+
+
+async def generate_explanation(
+    top_items: list[dict],
+    weather_context: dict,
+    style_preferences: dict,
+) -> str:
+    """
+    Generate a 2–3 sentence natural-language explanation for a set of recommendations.
+
+    Called only when the client passes include_explanation=True, since it adds
+    ~1–2s of LLM latency.
+
+    Args:
+        top_items: List of dicts with keys title, price, attributes (top 3 is enough).
+        weather_context: Dict with temp_c, condition.
+        style_preferences: User's style_preferences dict.
+
+    Returns:
+        A short explanation string, or an empty string on failure.
+    """
+    items_summary = "; ".join(
+        f"{item['title']} (${item['price']:.0f})" for item in top_items[:3]
+    )
+    condition = weather_context.get("condition", "")
+    temp_c = weather_context.get("temp_c", 20)
+
+    prompt = (
+        f"Weather: {condition}, {temp_c}°C. "
+        f"User preferences: {style_preferences}. "
+        f"Top recommended items: {items_summary}. "
+        "In 2–3 sentences, explain why these items suit this person today. "
+        "Be concise and conversational."
+    )
+
+    try:
+        client = get_client()
+        if not client:
+            return ""
+
+        response = await client.chat.completions.create(
+            model=_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.5,
+            max_tokens=150,
+        )
+        return response.choices[0].message.content.strip()
+
+    except Exception:
+        logger.error("LLM explanation generation failed", exc_info=True)
+        return ""
+
+
 def _get_fallback_suggestion(
     temp_c: float, condition: str, has_forecast: bool
 ) -> Dict[str, str]:
