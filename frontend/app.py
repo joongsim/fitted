@@ -6,7 +6,6 @@ import logging
 import boto3
 import httpx
 from fasthtml.common import *  # noqa: F403, F405 star import ok for fasthtml
-from mangum import Mangum
 import os
 
 logger = logging.getLogger(__name__)
@@ -17,10 +16,10 @@ API_BASE_URL = os.environ.get(
 )
 
 def get_ssm_parameter(name: str, default: str = None) -> str:
-    """Fetch parameter from SSM Parameter Store (for Lambda) or return default."""
-    if os.environ.get("AWS_EXECUTION_ENV"):
+    """Fetch parameter from SSM Parameter Store or return default."""
+    if os.environ.get("USE_SSM", "true").lower() != "false":
         try:
-            ssm = boto3.client("ssm")
+            ssm = boto3.client("ssm", region_name=os.environ.get("AWS_DEFAULT_REGION", "us-west-1"))
             response = ssm.get_parameter(Name=name, WithDecryption=True)
             logger.debug("Fetched SSM parameter: %s", name)
             return response["Parameter"]["Value"]
@@ -578,8 +577,6 @@ async def get_outfit(location: str, session):
             "Connection error fetching outfit for location=%s.", location, exc_info=True
         )
         return error_message("Connection error: could not reach the server")
-
-handler = Mangum(app, lifespan="off")
 
 if __name__ == "__main__":
     import uvicorn

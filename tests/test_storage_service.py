@@ -1,6 +1,5 @@
 """Tests for app/services/storage_service.py — S3 weather data storage."""
 import json
-import os
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -33,32 +32,15 @@ def _client_error(code="NoSuchBucket", message="Bucket not found"):
 
 
 class TestStoreRawWeatherDataLocalGuard:
-    async def test_skips_upload_when_is_local_true_and_not_lambda(self):
+    async def test_skips_upload_when_is_local_true(self):
         from app.services import storage_service
 
         mock_s3 = MagicMock()
         with patch.object(storage_service, "IS_LOCAL", True):
             with patch.object(storage_service, "s3_client", mock_s3):
-                with patch.dict(os.environ, {}, clear=False):
-                    os.environ.pop("AWS_EXECUTION_ENV", None)
-                    await storage_service.store_raw_weather_data("London", SAMPLE_WEATHER)
+                await storage_service.store_raw_weather_data("London", SAMPLE_WEATHER)
 
         mock_s3.put_object.assert_not_called()
-
-    async def test_proceeds_when_is_local_true_but_lambda_env_set(self):
-        from app.services import storage_service
-
-        mock_s3 = MagicMock()
-        with patch.object(storage_service, "IS_LOCAL", True):
-            with patch.object(storage_service, "s3_client", mock_s3):
-                with patch.object(storage_service, "WEATHER_BUCKET", SAMPLE_BUCKET):
-                    with patch.dict(
-                        os.environ,
-                        {"AWS_EXECUTION_ENV": "AWS_Lambda_python3.11"},
-                    ):
-                        await storage_service.store_raw_weather_data("London", SAMPLE_WEATHER)
-
-        mock_s3.put_object.assert_called_once()
 
     async def test_proceeds_when_is_local_false(self):
         from app.services import storage_service
@@ -67,9 +49,7 @@ class TestStoreRawWeatherDataLocalGuard:
         with patch.object(storage_service, "IS_LOCAL", False):
             with patch.object(storage_service, "s3_client", mock_s3):
                 with patch.object(storage_service, "WEATHER_BUCKET", SAMPLE_BUCKET):
-                    with patch.dict(os.environ, {}, clear=False):
-                        os.environ.pop("AWS_EXECUTION_ENV", None)
-                        await storage_service.store_raw_weather_data("London", SAMPLE_WEATHER)
+                    await storage_service.store_raw_weather_data("London", SAMPLE_WEATHER)
 
         mock_s3.put_object.assert_called_once()
 
@@ -113,9 +93,7 @@ class TestStoreRawWeatherDataS3Key:
         with patch.object(storage_service, "IS_LOCAL", False):
             with patch.object(storage_service, "s3_client", mock_s3):
                 with patch.object(storage_service, "WEATHER_BUCKET", SAMPLE_BUCKET):
-                    with patch.dict(os.environ, {}, clear=False):
-                        os.environ.pop("AWS_EXECUTION_ENV", None)
-                        await storage_service.store_raw_weather_data(
+                    await storage_service.store_raw_weather_data(
                             "London", SAMPLE_WEATHER, is_forecast=False
                         )
 
@@ -129,9 +107,7 @@ class TestStoreRawWeatherDataS3Key:
         with patch.object(storage_service, "IS_LOCAL", False):
             with patch.object(storage_service, "s3_client", mock_s3):
                 with patch.object(storage_service, "WEATHER_BUCKET", SAMPLE_BUCKET):
-                    with patch.dict(os.environ, {}, clear=False):
-                        os.environ.pop("AWS_EXECUTION_ENV", None)
-                        await storage_service.store_raw_weather_data(
+                    await storage_service.store_raw_weather_data(
                             "London", SAMPLE_WEATHER, is_forecast=True
                         )
 
@@ -148,9 +124,7 @@ class TestStoreRawWeatherDataS3Key:
         with patch.object(storage_service, "IS_LOCAL", False):
             with patch.object(storage_service, "s3_client", mock_s3):
                 with patch.object(storage_service, "WEATHER_BUCKET", SAMPLE_BUCKET):
-                    with patch.dict(os.environ, {}, clear=False):
-                        os.environ.pop("AWS_EXECUTION_ENV", None)
-                        with patch(
+                    with patch(
                             "app.services.storage_service.datetime"
                         ) as mock_dt:
                             mock_now = MagicMock()
@@ -172,9 +146,7 @@ class TestStoreRawWeatherDataS3Key:
         with patch.object(storage_service, "IS_LOCAL", False):
             with patch.object(storage_service, "s3_client", mock_s3):
                 with patch.object(storage_service, "WEATHER_BUCKET", SAMPLE_BUCKET):
-                    with patch.dict(os.environ, {}, clear=False):
-                        os.environ.pop("AWS_EXECUTION_ENV", None)
-                        await storage_service.store_raw_weather_data(
+                    await storage_service.store_raw_weather_data(
                             "New York City!", SAMPLE_WEATHER
                         )
 
@@ -190,9 +162,7 @@ class TestStoreRawWeatherDataS3Key:
         with patch.object(storage_service, "IS_LOCAL", False):
             with patch.object(storage_service, "s3_client", mock_s3):
                 with patch.object(storage_service, "WEATHER_BUCKET", SAMPLE_BUCKET):
-                    with patch.dict(os.environ, {}, clear=False):
-                        os.environ.pop("AWS_EXECUTION_ENV", None)
-                        await storage_service.store_raw_weather_data("London", SAMPLE_WEATHER)
+                    await storage_service.store_raw_weather_data("London", SAMPLE_WEATHER)
 
         call_kwargs = mock_s3.put_object.call_args[1]
         assert call_kwargs["Bucket"] == SAMPLE_BUCKET
@@ -204,9 +174,7 @@ class TestStoreRawWeatherDataS3Key:
         with patch.object(storage_service, "IS_LOCAL", False):
             with patch.object(storage_service, "s3_client", mock_s3):
                 with patch.object(storage_service, "WEATHER_BUCKET", SAMPLE_BUCKET):
-                    with patch.dict(os.environ, {}, clear=False):
-                        os.environ.pop("AWS_EXECUTION_ENV", None)
-                        await storage_service.store_raw_weather_data("London", SAMPLE_WEATHER)
+                    await storage_service.store_raw_weather_data("London", SAMPLE_WEATHER)
 
         call_kwargs = mock_s3.put_object.call_args[1]
         parsed = json.loads(call_kwargs["Body"])
@@ -219,9 +187,7 @@ class TestStoreRawWeatherDataS3Key:
         with patch.object(storage_service, "IS_LOCAL", False):
             with patch.object(storage_service, "s3_client", mock_s3):
                 with patch.object(storage_service, "WEATHER_BUCKET", SAMPLE_BUCKET):
-                    with patch.dict(os.environ, {}, clear=False):
-                        os.environ.pop("AWS_EXECUTION_ENV", None)
-                        await storage_service.store_raw_weather_data("London", SAMPLE_WEATHER)
+                    await storage_service.store_raw_weather_data("London", SAMPLE_WEATHER)
 
         call_kwargs = mock_s3.put_object.call_args[1]
         assert call_kwargs["ContentType"] == "application/json"
@@ -242,12 +208,10 @@ class TestStoreRawWeatherDataErrorHandling:
         with patch.object(storage_service, "IS_LOCAL", False):
             with patch.object(storage_service, "s3_client", mock_s3):
                 with patch.object(storage_service, "WEATHER_BUCKET", SAMPLE_BUCKET):
-                    with patch.dict(os.environ, {}, clear=False):
-                        os.environ.pop("AWS_EXECUTION_ENV", None)
-                        # Should swallow the error and return None
-                        result = await storage_service.store_raw_weather_data(
-                            "London", SAMPLE_WEATHER
-                        )
+                    # Should swallow the error and return None
+                    result = await storage_service.store_raw_weather_data(
+                        "London", SAMPLE_WEATHER
+                    )
 
         assert result is None
 
@@ -260,10 +224,8 @@ class TestStoreRawWeatherDataErrorHandling:
         with patch.object(storage_service, "IS_LOCAL", False):
             with patch.object(storage_service, "s3_client", mock_s3):
                 with patch.object(storage_service, "WEATHER_BUCKET", SAMPLE_BUCKET):
-                    with patch.dict(os.environ, {}, clear=False):
-                        os.environ.pop("AWS_EXECUTION_ENV", None)
-                        result = await storage_service.store_raw_weather_data(
-                            "London", SAMPLE_WEATHER
-                        )
+                    result = await storage_service.store_raw_weather_data(
+                        "London", SAMPLE_WEATHER
+                    )
 
         assert result is None

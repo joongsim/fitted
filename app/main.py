@@ -9,8 +9,6 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Query, Depends, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordRequestForm
-from mangum import Mangum
-
 from app.services import weather_service
 from app.services import llm_service
 from app.core.config import config
@@ -40,10 +38,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Lambda handler - this is what AWS Lambda will call
-# Configure Mangum with lifespan="off" to avoid async context issues in Lambda
-handler = Mangum(app, lifespan="off", api_gateway_base_path="/")
 
 @app.get("/")
 def read_root():
