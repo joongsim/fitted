@@ -28,5 +28,3 @@ email-validator>=2.0.0
 # Config
 python-dotenv>=1.0.0
 
-# Backward compat (Lambda handler, unused on EC2 but imported in main.py and frontend/app.py)
-mangum>=0.17.0

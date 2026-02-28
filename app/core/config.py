@@ -97,7 +97,7 @@ class Config:
 
     @property
     def weather_bucket_name(self) -> str:
-        """Get Weather Data S3 bucket name from environment (injected by SAM template)."""
+        """Get Weather Data S3 bucket name from environment (set in systemd service)."""
         value = os.environ.get("WEATHER_BUCKET_NAME")
         logger.debug("WEATHER_BUCKET_NAME: %s", value)
         if not value:

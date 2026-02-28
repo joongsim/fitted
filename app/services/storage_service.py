@@ -34,9 +34,7 @@ async def store_raw_weather_data(
         data: The raw JSON response from the weather API.
         is_forecast: Whether the data includes forecast information.
     """
-    is_lambda = os.environ.get("AWS_EXECUTION_ENV") is not None
-
-    if IS_LOCAL and not is_lambda:
+    if IS_LOCAL:
         logger.debug(
             "Running locally — skipping S3 upload for location=%s.", location
         )
