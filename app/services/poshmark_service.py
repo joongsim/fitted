@@ -66,7 +66,7 @@ def is_quality_listing(listing: PoshmarkListingRaw) -> bool:
     - Title must be a non-empty string of at least 3 characters
     - Cover shot must exist and have a url_small value
     """
-    if listing.condition is not None and listing.condition not in ALLOWED_CONDITIONS:
+    if listing.condition is None or listing.condition not in ALLOWED_CONDITIONS:
         return False
     if listing.price_amount is None:
         return False
@@ -218,7 +218,7 @@ async def search_listings(
         )
 
         # Parse and validate each listing; skip malformed entries
-        raw_listings = data if isinstance(data, list) else data.get("data", [])
+        raw_listings = data if isinstance(data, list) else data.get("listings", [])
         results: list[PoshmarkListingRaw] = []
         for raw in raw_listings:
             try:
