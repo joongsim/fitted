@@ -1812,104 +1812,70 @@ if __name__ == "__main__":
 
 ## 14. Testing Strategy
 
-Testing this pipeline requires mocking three heavy dependencies: `torch`/`open_clip`, the async psycopg3 pool, and S3. Here's how we handle each.
+Testing this pipeline requires mocking three heavy dependencies: `torch`/`open_clip`, the async psycopg3 pool, and S3. The test file is `tests/test_recommendation_service.py` and covers 31 cases across five test classes.
 
-### Mocking CLIP (the most important one)
+### Key insight: lazy imports and patch targets
 
-We never want to load the actual CLIP model in CI — it's slow and requires downloading weights. We mock at the `encode_text` boundary, not at the torch level, since everything above that boundary is what we're actually testing:
+`recommend()` imports its service dependencies inside the method body:
 
 ```python
-# In tests/conftest.py — add alongside existing fixtures
-
-import numpy as np
-from unittest.mock import patch
-import pytest
-
-MOCK_EMBEDDING_DIM = 512
-
-
-@pytest.fixture
-def fake_embedding() -> np.ndarray:
-    """A deterministic 512-dim unit vector for tests."""
-    vec = np.ones(MOCK_EMBEDDING_DIM, dtype=np.float32)
-    return vec / np.linalg.norm(vec)
-
-
-@pytest.fixture
-def mock_encode_text(fake_embedding):
-    """
-    Patch encode_text globally to return a deterministic unit vector.
-    Use this in any test that calls code which transitively calls encode_text.
-    """
-    with patch(
-        "app.services.embedding_service.encode_text",
-        return_value=fake_embedding,
-    ) as m:
-        yield m
+async def recommend(self, ...):
+    from app.services import llm_service, embedding_service, vector_cache, dev_catalog_service
+    ...
 ```
 
-For `test_embedding_service.py` specifically, we test the encoding logic by mocking at the `open_clip` level:
+This means you **cannot** patch `app.services.recommendation_service.llm_service.generate_search_query` — `llm_service` is not a module-level attribute of `recommendation_service`. Instead, patch at the **source module**:
 
 ```python
-import numpy as np
-import torch
+# ✗ Wrong — AttributeError at test time
+patch("app.services.recommendation_service.llm_service.generate_search_query")
+
+# ✓ Correct — patches the function in the module where it lives
+patch("app.services.llm_service.generate_search_query")
+```
+
+The same rule applies to all lazily-imported services. The test file defines these as module-level constants for reuse:
+
+```python
+_PATCH_LLM     = "app.services.llm_service.generate_search_query"
+_PATCH_ENCODE  = "app.services.embedding_service.encode_text"
+_PATCH_CACHE_LOOKUP = "app.services.vector_cache.lookup"
+_PATCH_CACHE_STORE  = "app.services.vector_cache.store"
+_PATCH_CATALOG = "app.services.dev_catalog_service.search"
+_PATCH_CONN    = "app.services.recommendation_service.get_connection"
+_PATCH_EXPLAIN = "app.services.llm_service.generate_explanation"
+```
+
+### The `_make_service()` helper
+
+`RecommendationService.__init__` calls `_load_towers_from_s3`, which makes a real S3 API call. Patch it out so tests get Xavier-initialised towers with no network I/O:
+
+```python
 from unittest.mock import MagicMock, patch
-import pytest
-
-from app.services.embedding_service import reset_model_for_testing
+from app.services.recommendation_service import RecommendationService
 
 
-@pytest.fixture(autouse=True)
-def reset_clip_singleton():
-    """Ensure the model singleton is clean before and after each test."""
-    reset_model_for_testing()
-    yield
-    reset_model_for_testing()
-
-
-async def test_encode_text_returns_512_dim_unit_vector():
-    """encode_text should return a (512,) float32 array with unit norm."""
-    fake_features = torch.ones(1, 512)  # raw (unnormalized) features from mock model
-    mock_model = MagicMock()
-    mock_model.encode_text.return_value = fake_features
-    mock_tokenizer = MagicMock(return_value=MagicMock())
-
-    with patch("app.services.embedding_service._load_model", return_value=(mock_model, mock_tokenizer)):
-        from app.services.embedding_service import encode_text
-        result = encode_text("blue casual shirt")
-
-    assert result.shape == (512,)
-    assert result.dtype == np.float32
-    assert abs(np.linalg.norm(result) - 1.0) < 1e-5, "Result must be a unit vector"
-
-
-async def test_encode_text_calls_model_encode_text():
-    """encode_text should call model.encode_text with tokenized input."""
-    fake_features = torch.ones(1, 512)
-    mock_model = MagicMock()
-    mock_model.encode_text.return_value = fake_features
-    mock_tokenizer = MagicMock(return_value="mock_tokens")
-
-    with patch("app.services.embedding_service._load_model", return_value=(mock_model, mock_tokenizer)):
-        from app.services.embedding_service import encode_text
-        encode_text("test query")
-
-    mock_model.encode_text.assert_called_once_with("mock_tokens")
+def _make_service() -> RecommendationService:
+    """Return a RecommendationService with Xavier-init towers (no real S3/torch call)."""
+    # _load_towers_from_s3 returning None triggers Xavier cold start
+    with patch(
+        "app.services.recommendation_service._load_towers_from_s3", return_value=None
+    ):
+        svc = RecommendationService(s3_client=MagicMock(), bucket="test-bucket")
+    return svc
 ```
 
 ### Mocking psycopg3
 
-Reuse the helper pattern from `test_user_service.py`. The key insight: `conn.cursor()` is a **synchronous call** that returns an **async context manager** — not a coroutine. Mock it accordingly:
+`conn.cursor()` is a **synchronous call** that returns an **async context manager** — not a coroutine. Mock it accordingly:
 
 ```python
 from contextlib import asynccontextmanager
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 
-def _make_mock_conn(fetchone_return=None, fetchall_return=None):
-    """Build a mock async psycopg3 connection + cursor."""
+def _make_mock_conn(fetchall_return=None):
     mock_cur = AsyncMock()
-    mock_cur.fetchone = AsyncMock(return_value=fetchone_return)
     mock_cur.fetchall = AsyncMock(return_value=fetchall_return or [])
     mock_cur.execute = AsyncMock()
 
@@ -1920,7 +1886,6 @@ def _make_mock_conn(fetchone_return=None, fetchall_return=None):
     mock_conn = MagicMock()
     mock_conn.cursor = MagicMock(return_value=mock_cur_ctx)  # sync call!
     mock_conn.commit = AsyncMock()
-    mock_conn.rollback = AsyncMock()
 
     return mock_conn, mock_cur
 
@@ -1928,57 +1893,11 @@ def _make_mock_conn(fetchone_return=None, fetchall_return=None):
 @asynccontextmanager
 async def _mock_get_connection(mock_conn):
     yield mock_conn
-
-
-def _patch_vector_cache_conn(mock_conn):
-    return patch(
-        "app.services.vector_cache.get_connection",
-        return_value=_mock_get_connection(mock_conn),
-    )
 ```
 
-### Mocking S3
+### Testing towers directly (no mocks needed)
 
-For unit tests where S3 behavior isn't the focus, pass a `MagicMock()` as `s3_client` and assert on calls:
-
-```python
-from unittest.mock import MagicMock
-
-async def test_vector_cache_store_calls_put_object():
-    import numpy as np
-    from app.services import vector_cache
-    from app.models.item import Item
-
-    mock_s3 = MagicMock()
-    mock_s3.put_object.return_value = {}
-
-    mock_conn, mock_cur = _make_mock_conn()
-    item = Item(
-        item_id="abc123", domain="fashion", title="Navy blazer",
-        price=45.0, image_url="", product_url="https://poshmark.com/abc",
-        source="poshmark_seed", embedding=None, attributes={},
-    )
-    query_emb = np.ones(512, dtype=np.float32) / np.sqrt(512)
-
-    with _patch_vector_cache_conn(mock_conn):
-        result = await vector_cache.store(
-            query_text="navy blazer men",
-            query_embedding=query_emb,
-            items=[item],
-            s3_client=mock_s3,
-            bucket="test-bucket",
-        )
-
-    mock_s3.put_object.assert_called_once()
-    call_kwargs = mock_s3.put_object.call_args.kwargs
-    assert call_kwargs["Bucket"] == "test-bucket"
-    assert call_kwargs["Key"].startswith("cache/query/")
-    assert result is not None  # returns cache_id on success
-```
-
-### Testing the Two-Towers model directly
-
-The towers are pure numpy — no mocking needed:
+`UserTower` and `ItemTower` are pure numpy — no I/O, no torch at runtime:
 
 ```python
 import numpy as np
@@ -1987,43 +1906,182 @@ from app.services.recommendation_service import UserTower, ItemTower
 _DIM = 512
 
 
-def test_user_tower_xavier_init_produces_correct_shape():
+def test_xavier_init_produces_correct_shape():
     tower = UserTower()
     assert tower.W.shape == (_DIM, _DIM)
     assert tower.W.dtype == np.float32
 
 
-def test_user_tower_forward_returns_unit_vector():
+def test_forward_returns_unit_vector():
     tower = UserTower()
     x = np.random.randn(_DIM).astype(np.float32)
     x /= np.linalg.norm(x)
     result = tower.forward(x)
-    assert result.shape == (_DIM,)
     assert abs(np.linalg.norm(result) - 1.0) < 1e-5
 
 
-def test_rank_returns_sorted_descending():
-    from app.models.item import Item
-    from app.services.recommendation_service import RecommendationService
-    from unittest.mock import MagicMock
+def test_loaded_weights_stored_as_float32():
+    weights = np.eye(_DIM, dtype=np.float64)  # pass float64
+    tower = UserTower(weights=weights)
+    assert tower.W.dtype == np.float32          # always cast to float32
+```
 
-    svc = RecommendationService(s3_client=MagicMock(), bucket="test-bucket")
+### Testing `rank()` — identity weights for deterministic ordering
 
-    user_vec = np.ones(_DIM, dtype=np.float32) / np.sqrt(_DIM)
+Xavier-random projection weights scramble cosine ordering, making rank tests flaky. Use **identity weights** so the projection is a no-op and the cosine similarity between embeddings is unchanged:
 
-    # Item A: embedding identical to user → high score
-    emb_a = np.ones(_DIM, dtype=np.float32) / np.sqrt(_DIM)
-    # Item B: embedding orthogonal to user → low score
+```python
+def test_returns_sorted_descending():
+    identity = np.eye(_DIM, dtype=np.float32)
+    svc = _make_service()
+    svc.user_tower = UserTower(weights=identity)
+    svc.item_tower = ItemTower(weights=identity)
+
+    # item_a: embedding identical to user → cosine similarity ≈ 1.0
+    emb_a = _UNIT_VEC.copy()
+    # item_b: first basis vector → cosine similarity = 1/sqrt(512) ≈ 0.044
     emb_b = np.zeros(_DIM, dtype=np.float32)
     emb_b[0] = 1.0
 
-    item_a = Item("a", "fashion", "Item A", 10.0, "", "", "seed", emb_a, {})
-    item_b = Item("b", "fashion", "Item B", 10.0, "", "", "seed", emb_b, {})
+    item_a = _make_item("a", embedding=emb_a)
+    item_b = _make_item("b", embedding=emb_b)
 
-    ranked = svc.rank(user_vec, [item_b, item_a])  # pass in reverse order
+    ranked = svc.rank(_UNIT_VEC, [item_b, item_a])  # reversed order
 
-    assert ranked[0][0].item_id == "a"  # A should rank first
-    assert ranked[0][1] > ranked[1][1]  # scores are descending
+    assert ranked[0][0].item_id == "a"
+    assert ranked[0][1] > ranked[1][1]
+```
+
+### Testing `recommend()` — stacking patches with `ExitStack`
+
+The full pipeline needs seven simultaneous patches. `contextlib.ExitStack` keeps this readable without deep nesting:
+
+```python
+from contextlib import ExitStack, asynccontextmanager
+from unittest.mock import AsyncMock, patch
+
+
+async def test_returns_top_k_results():
+    svc = _make_service()
+    candidates = [_make_item(str(i), embedding=_UNIT_VEC.copy()) for i in range(20)]
+    mock_conn, _ = _make_mock_conn(fetchall_return=[])
+
+    with ExitStack() as stack:
+        stack.enter_context(patch(_PATCH_LLM,   new=AsyncMock(return_value="query")))
+        stack.enter_context(patch(_PATCH_ENCODE, return_value=_UNIT_VEC.copy()))
+        stack.enter_context(patch(_PATCH_CACHE_LOOKUP, new=AsyncMock(return_value=None)))
+        stack.enter_context(patch(_PATCH_CATALOG,      new=AsyncMock(return_value=candidates)))
+        stack.enter_context(patch(_PATCH_CACHE_STORE,  new=AsyncMock(return_value="id")))
+        stack.enter_context(patch(_PATCH_CONN, return_value=_mock_get_connection(mock_conn)))
+
+        result = await svc.recommend(
+            user_id="u1",
+            location="London",
+            weather_context={"temp_c": 22.0, "condition": "Clear"},
+            style_preferences={},
+            top_k=5,
+        )
+
+    assert len(result) == 5
+
+
+async def test_uses_cached_candidates_on_hit():
+    """On cache hit, dev_catalog_service.search must NOT be called."""
+    svc = _make_service()
+    cached_items = [_make_item("cached", embedding=_UNIT_VEC.copy())]
+    mock_conn, _ = _make_mock_conn(fetchall_return=[])
+    mock_catalog = AsyncMock(return_value=[])
+
+    with ExitStack() as stack:
+        stack.enter_context(patch(_PATCH_LLM,   new=AsyncMock(return_value="query")))
+        stack.enter_context(patch(_PATCH_ENCODE, return_value=_UNIT_VEC.copy()))
+        stack.enter_context(patch(_PATCH_CACHE_LOOKUP,
+                                  new=AsyncMock(return_value=(cached_items, "cache-id-123"))))
+        stack.enter_context(patch(_PATCH_CATALOG, new=mock_catalog))
+        stack.enter_context(patch(_PATCH_CONN, return_value=_mock_get_connection(mock_conn)))
+
+        result = await svc.recommend(
+            user_id="u1", location="LA",
+            weather_context={"temp_c": 25.0, "condition": "Sunny"},
+            style_preferences={},
+        )
+
+    mock_catalog.assert_not_called()
+    assert result[0].item_id == "cached"
+```
+
+### Testing the singleton — patching `boto3.client`
+
+`init_recommendation_service()` calls `import boto3; boto3.client("s3")` inside the function, so patch `boto3.client` at the top-level module (not through `recommendation_service`):
+
+```python
+def test_init_recommendation_service_creates_singleton():
+    with patch("app.services.recommendation_service._load_towers_from_s3",
+               return_value=None):
+        with patch("boto3.client", return_value=MagicMock()):
+            with patch("app.core.config.config") as mock_cfg:
+                mock_cfg.weather_bucket_name = "test-bucket"
+                init_recommendation_service()
+
+    svc = get_recommendation_service()
+    assert svc is not None
+
+
+def test_init_recommendation_service_is_idempotent():
+    """Calling init twice must not replace the existing singleton."""
+    with patch("app.services.recommendation_service._load_towers_from_s3",
+               return_value=None):
+        with patch("boto3.client", return_value=MagicMock()):
+            with patch("app.core.config.config") as mock_cfg:
+                mock_cfg.weather_bucket_name = "test-bucket"
+                init_recommendation_service()
+                first  = get_recommendation_service()
+                init_recommendation_service()  # second call — no-op
+                second = get_recommendation_service()
+
+    assert first is second
+```
+
+Use `setup_method` / `teardown_method` to reset `mod._recommendation_service = None` before and after each singleton test.
+
+### Mocking CLIP in `test_embedding_service.py`
+
+For the embedding service itself, mock at the `_load_model` boundary (not `open_clip` directly) and use `reset_model_for_testing()` to clear the singleton between tests:
+
+```python
+import numpy as np
+import torch
+from unittest.mock import MagicMock, patch
+from app.services.embedding_service import reset_model_for_testing
+
+
+@pytest.fixture(autouse=True)
+def reset_clip_singleton():
+    reset_model_for_testing()
+    yield
+    reset_model_for_testing()
+
+
+def test_encode_text_returns_512_dim_unit_vector():
+    mock_model = MagicMock()
+    mock_model.encode_text.return_value = torch.ones(1, 512)
+    mock_tokenizer = MagicMock(return_value=MagicMock())
+
+    with patch("app.services.embedding_service._load_model",
+               return_value=(mock_model, mock_tokenizer)):
+        from app.services.embedding_service import encode_text
+        result = encode_text("blue casual shirt")
+
+    assert result.shape == (512,)
+    assert result.dtype == np.float32
+    assert abs(np.linalg.norm(result) - 1.0) < 1e-5
+```
+
+For all other services that call `encode_text` transitively, patch at the source:
+
+```python
+with patch("app.services.embedding_service.encode_text", return_value=_UNIT_VEC.copy()):
+    result = await svc._build_user_embedding("user-1", prefs)
 ```
 
 ---
