@@ -14,66 +14,19 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v2
+      - name: Set up Python
+        uses: actions/setup-python@v4
         with:
-          role-to-assume: arn:aws:iam::903558039846:role/github_actions
-          aws-region: us-west-1
+          python-version: '3.11'
 
-      - name: Run tests on EC2 via SSM
-        run: |
-          BRANCH="${{ github.ref_name }}"
-          if [[ ! "$BRANCH" =~ ^[a-zA-Z0-9/_.-]+$ ]]; then
-            echo "Invalid branch name: $BRANCH"
-            exit 1
-          fi
+      - name: Install uv
+        run: pip install uv
 
-          COMMAND_ID=$(aws ssm send-command \
-            --region us-west-1 \
-            --instance-ids "${{ secrets.EC2_INSTANCE_ID }}" \
-            --document-name "AWS-RunShellScript" \
-            --parameters "commands=[\"runuser -l ec2-user -c 'cd /home/ec2-user/fitted && git fetch origin && git checkout $BRANCH && git pull origin $BRANCH && ([ -d .venv ] || uv venv --python 3.11 --quiet) && uv pip install pytest pytest-asyncio nest-asyncio --quiet && PYTHONPATH=. .venv/bin/pytest tests/ -v'\"],executionTimeout=[\"1800\"]" \
-            --query 'Command.CommandId' \
-            --output text)
+      - name: Install dependencies
+        run: uv venv && uv sync
 
-          echo "SSM Command ID: $COMMAND_ID"
-
-          # Poll for up to 35 minutes (slightly above executionTimeout)
-          STATUS="InProgress"
-          for i in $(seq 1 140); do
-            STATUS=$(aws ssm get-command-invocation \
-              --region us-west-1 \
-              --command-id "$COMMAND_ID" \
-              --instance-id "${{ secrets.EC2_INSTANCE_ID }}" \
-              --query 'Status' \
-              --output text 2>/dev/null || echo "Pending")
-            echo "[$i/140] Status: $STATUS"
-            if [[ "$STATUS" == "Success" || "$STATUS" == "Failed" || "$STATUS" == "TimedOut" || "$STATUS" == "Cancelled" || "$STATUS" == "DeliveryTimedOut" ]]; then
-              break
-            fi
-            sleep 15
-          done
-
-          echo "--- STDOUT ---"
-          aws ssm get-command-invocation \
-            --region us-west-1 \
-            --command-id "$COMMAND_ID" \
-            --instance-id "${{ secrets.EC2_INSTANCE_ID }}" \
-            --query 'StandardOutputContent' \
-            --output text
-
-          echo "--- STDERR ---"
-          aws ssm get-command-invocation \
-            --region us-west-1 \
-            --command-id "$COMMAND_ID" \
-            --instance-id "${{ secrets.EC2_INSTANCE_ID }}" \
-            --query 'StandardErrorContent' \
-            --output text
-
-          if [ "$STATUS" != "Success" ]; then
-            echo "Tests failed with status: $STATUS"
-            exit 1
-          fi
+      - name: Run tests
+        run: PYTHONPATH=. .venv/bin/pytest tests/ -v
 
   deploy:
     runs-on: ubuntu-latest
