@@ -38,6 +38,10 @@ User request
 14. [Testing Strategy](#14-testing-strategy)
 15. [Late Interaction Reranking](#15-late-interaction-reranking)
 16. [Future Architecture Directions](#16-future-architecture-directions)
+17. [Wardrobe CRUD Service](#17-wardrobe-crud-service)
+18. [Interaction Logging](#18-interaction-logging)
+19. [The Bradley-Terry Preference Reranker](#19-the-bradley-terry-preference-reranker)
+20. [Frontend: Wardrobe, Preferences, and Product Cards](#20-frontend-wardrobe-preferences-and-product-cards)
 
 ---
 
@@ -2240,7 +2244,528 @@ The pipeline already has an LLM in the loop for query generation and explanation
 
 ### Bradley-Terry preference reranker
 
-The `preference_context` stub in `FashionDomain` is a placeholder for the Week 8 training pipeline. Once users have expressed pairwise preferences ("I prefer A over B") through the UI, a Bradley-Terry model trained on those signals can rerank candidates in a way that reflects individual taste more directly than cosine similarity in CLIP space. This requires real interaction data and cannot be bootstrapped with Xavier initialisation the way the two-tower model can.
+The preference reranker is now implemented — see [Section 19](#19-the-bradley-terry-preference-reranker). Once users express pairwise preferences through the frontend UI, the Bradley-Terry model re-orders candidates based on individual taste signals that the two-tower model cannot capture from embeddings alone. At cold start (no preference pairs recorded yet), the reranker is a no-op and the two-tower order is returned unchanged.
+
+---
+
+## 17. Wardrobe CRUD Service
+
+### Why wardrobe items are the highest-quality user signal
+
+The recommendation pipeline builds a user embedding by mean-pooling the CLIP embeddings of every item in the user's wardrobe (see `_build_user_embedding` in `recommendation_service.py`). This is semantically superior to encoding raw style preference tags because the wardrobe items live in exactly the same CLIP embedding space as the catalog items being ranked — a navy blazer in the wardrobe and a navy blazer in the catalog will be close neighbors regardless of how the user described their style in text.
+
+For this to work, users need a way to photograph and upload their existing clothes. The wardrobe CRUD service is the write path for those items.
+
+### Schema recap
+
+The `wardrobe_items` table was created in the initial DB migration:
+
+```sql
+CREATE TABLE IF NOT EXISTS wardrobe_items (
+    item_id       UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id       UUID REFERENCES users(user_id) ON DELETE CASCADE,
+    name          VARCHAR(255) NOT NULL,
+    category      VARCHAR(50),                         -- tops / bottoms / outerwear / shoes / accessories
+    image_s3_key  TEXT,                                -- wardrobe-images/{user_id}/{item_id}.jpg
+    embedding     VECTOR(512),                         -- NULL until backfill script runs
+    classification JSONB DEFAULT '{}',                 -- VLM-assigned attributes (future)
+    tags          TEXT[] DEFAULT '{}',
+    created_at    TIMESTAMPTZ DEFAULT NOW()
+);
+```
+
+`embedding` is `NULL` on insert — it is populated later by a backfill script (same pattern as `catalog_items.embedding` in §13). The recommendation pipeline skips items with `NULL` embeddings when building the user vector, so the system degrades gracefully on partially-backfilled wardrobes.
+
+### S3 image upload flow
+
+Wardrobe images are routed through the API (browser → frontend → backend → S3) rather than uploaded directly from the browser. This keeps the S3 bucket private and avoids exposing AWS credentials to the client.
+
+```
+Browser
+  │
+  │  multipart/form-data (name, category, image file)
+  ▼
+FastHTML frontend  (/wardrobe/upload)
+  │
+  │  httpx multipart relay
+  ▼
+FastAPI backend  (POST /wardrobe)
+  │
+  ├──► S3: put_object("wardrobe-images/{user_id}/{item_id}.jpg")
+  │         returns S3 key on success, None on failure (graceful degrade)
+  │
+  └──► PostgreSQL: INSERT INTO wardrobe_items (... image_s3_key ...)
+```
+
+The image key uses a predictable path: `wardrobe-images/{user_id}/{item_id}.jpg`. The `item_id` is generated with `uuid.uuid4()` _before_ the S3 upload so the path is deterministic regardless of insert order.
+
+### `storage_service.py` additions
+
+Two functions were added to `app/services/storage_service.py`:
+
+```python
+def upload_wardrobe_image(
+    file_content: bytes,
+    content_type: str,
+    user_id: str,
+    item_id: str,
+) -> Optional[str]:
+    """
+    Upload a wardrobe item image to S3.
+    Returns the S3 key on success, None if S3 is unavailable (graceful degrade).
+    """
+    key = f"wardrobe-images/{user_id}/{item_id}.jpg"
+    s3_client.put_object(
+        Bucket=WEATHER_BUCKET, Key=key, Body=file_content, ContentType=content_type
+    )
+    return key
+
+
+def get_image_presigned_url(s3_key: str, expiry_seconds: int = 3600) -> Optional[str]:
+    """
+    Generate a presigned GET URL for a wardrobe image (1 h default expiry).
+    Returns None if S3 is unavailable.
+    """
+    return s3_client.generate_presigned_url(
+        "get_object",
+        Params={"Bucket": WEATHER_BUCKET, "Key": s3_key},
+        ExpiresIn=expiry_seconds,
+    )
+```
+
+Both follow the same graceful-degrade pattern as the rest of `storage_service.py`: catch exceptions, log them, and return `None` rather than raising. The S3 key is stored in `wardrobe_items.image_s3_key`; when the frontend requests the wardrobe list, the backend converts each key to a presigned URL on-the-fly and returns it as `image_url` in the response.
+
+### `wardrobe_service.py`
+
+`app/services/wardrobe_service.py` mirrors the structure of `user_service.py` — async psycopg3 context managers, explicit `commit()` after mutations, debug/info logs on all operations:
+
+```python
+async def create_wardrobe_item(
+    user_id: str, name: str, category: Optional[str], image_s3_key: Optional[str]
+) -> dict:
+    """Insert and return the new wardrobe item as a plain dict."""
+    async with get_connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                INSERT INTO wardrobe_items (user_id, name, category, image_s3_key)
+                VALUES (%s, %s, %s, %s)
+                RETURNING item_id, name, category, image_s3_key, tags, created_at
+                """,
+                (user_id, name, category, image_s3_key),
+            )
+            row = await cur.fetchone()
+            await conn.commit()
+    # ... unpack row, return dict
+
+
+async def get_wardrobe_items(user_id: str) -> list[dict]:
+    """Return all wardrobe items for a user, newest first."""
+
+async def get_wardrobe_item(user_id: str, item_id: str) -> Optional[dict]:
+    """Fetch a single item, enforcing ownership (WHERE user_id = %s AND item_id = %s)."""
+
+async def delete_wardrobe_item(user_id: str, item_id: str) -> bool:
+    """Delete a wardrobe item. Returns True if deleted, False if not found or wrong user."""
+```
+
+The ownership enforcement pattern in `delete_wardrobe_item` is important: the `WHERE` clause includes both `item_id = %s AND user_id = %s`. A user who knows another user's item UUID cannot delete it — the row simply won't match. This mirrors the IDOR protection in the `/recommend-products` endpoint.
+
+### Pydantic models (`app/models/wardrobe.py`)
+
+```python
+class WardrobeItemCreate(BaseModel):
+    name: str
+    category: Optional[str] = None  # tops | bottoms | outerwear | shoes | accessories
+
+
+class WardrobeItemResponse(BaseModel):
+    item_id: str
+    name: str
+    category: Optional[str]
+    image_url: Optional[str]   # presigned S3 GET URL (1 h expiry), None if no image
+    tags: list[str]
+    created_at: datetime
+    model_config = ConfigDict(from_attributes=True)
+```
+
+`image_url` is a presigned URL, not the raw S3 key — the key stays server-side.
+
+### API endpoints
+
+```
+GET    /wardrobe              — list user's items; generates presigned URLs for each image
+POST   /wardrobe              — multipart/form-data: name (Form), category (Form), image (File)
+DELETE /wardrobe/{item_id}    — 204 on success, 404 if not found or wrong user
+```
+
+The `POST /wardrobe` endpoint signature:
+
+```python
+@app.post("/wardrobe", status_code=status.HTTP_201_CREATED)
+async def add_wardrobe_item(
+    name: str = Form(..., min_length=1, max_length=255),
+    category: Optional[str] = Form(None),
+    image: Optional[UploadFile] = File(None),
+    user_id: str = Depends(auth.get_current_user_id),
+) -> dict:
+    ...
+```
+
+`user_id` comes from the JWT dependency — never from the request body. Even if a client sends a spoofed `user_id` field in the form, it is ignored.
+
+---
+
+## 18. Interaction Logging
+
+### Why log interactions?
+
+The two-tower model currently uses Xavier-initialized weights — it scores items based on CLIP-space geometry rather than observed user behavior. The Week 8 training pipeline will fine-tune those weights using implicit feedback: clicks, saves, and dismisses. Without an interaction log, there is nothing to train on.
+
+The interaction log also serves a direct quality signal: a "dismiss" on an item is evidence of negative preference, and a "save" is a strong positive signal. These do not need to wait for model retraining to be useful — they feed the Bradley-Terry reranker in §19 alongside the explicit pairwise comparison signals.
+
+### `user_interactions` table
+
+Added to `scripts/db_migrate.py`:
+
+```sql
+CREATE TABLE IF NOT EXISTS user_interactions (
+    interaction_id   UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id          UUID REFERENCES users(user_id) ON DELETE CASCADE,
+    item_id          TEXT REFERENCES catalog_items(item_id),
+    interaction_type VARCHAR NOT NULL CHECK (interaction_type IN ('click', 'save', 'dismiss')),
+    weather_context  JSONB DEFAULT '{}',
+    query_text       TEXT,
+    created_at       TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_interactions_user ON user_interactions (user_id, created_at DESC);
+```
+
+`item_id` references `catalog_items`, not `wardrobe_items` — interactions are with recommended catalog products, not with the user's own clothes. `weather_context` and `query_text` are stored alongside each interaction so the training pipeline can use them as features (the recommendation was made under these conditions; the user clicked/dismissed).
+
+### `POST /interactions` endpoint
+
+```python
+class InteractionCreate(BaseModel):
+    item_id: str
+    interaction_type: str   # 'click' | 'save' | 'dismiss'
+    weather_context: dict = {}
+    query_text: Optional[str] = None
+
+
+@app.post("/interactions", status_code=status.HTTP_201_CREATED)
+async def log_interaction(
+    body: InteractionCreate,
+    user_id: str = Depends(auth.get_current_user_id),
+) -> dict:
+    ...
+    # INSERT INTO user_interactions (user_id, item_id, interaction_type, ...)
+    return {"status": "logged"}
+```
+
+The endpoint validates `interaction_type` explicitly (FastAPI's enum support requires a separate `Enum` class; a simple check keeps the model lean). `user_id` is from the JWT — users can only log interactions for themselves.
+
+### Frontend fire-and-forget pattern
+
+Interaction logging is designed to be invisible to the user. The HTMX pattern:
+
+```python
+Button(
+    "♥",
+    hx_post="/log-interaction",
+    hx_vals=f'{{"item_id":"{item["item_id"]}","interaction_type":"save"}}',
+    hx_swap="none",   # ← no DOM update; response discarded
+)
+```
+
+`hx_swap="none"` tells HTMX to make the request but ignore the response body. The button click records the signal without any visual feedback loop. This keeps the product card UI clean — the save/dismiss buttons are decorative from the user's perspective, consequential from the model's.
+
+### `preference_pairs` table
+
+```sql
+CREATE TABLE IF NOT EXISTS preference_pairs (
+    pair_id    UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id    UUID REFERENCES users(user_id) ON DELETE CASCADE,
+    item_a_id  TEXT REFERENCES catalog_items(item_id),
+    item_b_id  TEXT REFERENCES catalog_items(item_id),
+    preferred  VARCHAR NOT NULL CHECK (preferred IN ('a', 'b')),
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_pairs_user ON preference_pairs (user_id);
+```
+
+Unlike `user_interactions`, preference pairs are explicit pairwise judgments — "given these two items side-by-side, I prefer A." The `preferred` column is a simple `'a'` or `'b'` string; the Bradley-Terry model (§19) interprets these signals without needing to know which item "should" win.
+
+### `POST /preferences/pairs` endpoint
+
+```python
+class PreferencePairCreate(BaseModel):
+    item_a_id: str
+    item_b_id: str
+    preferred: str   # 'a' | 'b'
+
+
+@app.post("/preferences/pairs", status_code=status.HTTP_201_CREATED)
+async def record_preference_pair(
+    body: PreferencePairCreate,
+    user_id: str = Depends(auth.get_current_user_id),
+) -> dict:
+    # INSERT INTO preference_pairs (user_id, item_a_id, item_b_id, preferred)
+    return {"status": "recorded"}
+```
+
+Returns 201 with a minimal body. The frontend can call this fire-and-forget in the same `hx_swap="none"` pattern as interactions.
+
+---
+
+## 19. The Bradley-Terry Preference Reranker
+
+### Why two-tower similarity is not enough
+
+The two-tower model scores items by how close they are to the user's embedding in CLIP space. This is a measure of _objective relevance_ — the blazer matches your wardrobe's aesthetic. But two equally relevant items are not interchangeable: a user might consistently prefer slim-fit over relaxed-fit, or prefer a particular brand's colorways, or have a strong preference for items under a certain price threshold. None of these signals are visible to CLIP embeddings without explicit preference data.
+
+The Bradley-Terry model provides a principled way to convert pairwise preference signals ("I prefer A over B") into item-level strength scores that can be blended with the cosine similarity ranking.
+
+### The Bradley-Terry model
+
+Given a set of pairwise comparisons, the Bradley-Terry model assigns each item a positive "strength" parameter $w_i$ such that:
+
+$$P(i \text{ beats } j) = \frac{w_i}{w_i + w_j}$$
+
+The strengths are fit by maximum likelihood. For a dataset where item $i$ beat item $j$ a total of $n_{ij}^{(i)}$ times out of $n_{ij}$ comparisons, the log-likelihood is:
+
+$$\ell(w) = \sum_{i,j} n_{ij}^{(i)} \log w_i - n_{ij} \log(w_i + w_j)$$
+
+The closed-form MLE has no closed form, but the MM (minorization-maximization) algorithm converges reliably with a simple iterative update rule.
+
+### The MM algorithm
+
+The MM update for item $i$ is:
+
+$$w_i^{(\text{new})} = \frac{W_i}{\sum_{j \neq i} \frac{n_{ij}}{w_i + w_j}}$$
+
+where $W_i$ is the total number of times item $i$ was preferred. This is guaranteed to increase the log-likelihood at each step and converges to the global MLE (assuming the comparison graph is connected).
+
+```python
+def _bradley_terry_mm(
+    wins: dict[str, int],
+    comparisons: dict[tuple[str, str], int],
+    item_ids: list[str],
+) -> dict[str, float]:
+    n = len(item_ids)
+    idx = {iid: i for i, iid in enumerate(item_ids)}
+
+    # Symmetric comparison matrix: N[i, j] = total comparisons between i and j
+    N = np.zeros((n, n), dtype=np.float64)
+    for (a, b), cnt in comparisons.items():
+        i, j = idx[a], idx[b]
+        N[i, j] += cnt
+        N[j, i] += cnt
+
+    win_vec = np.array([wins.get(iid, 0) for iid in item_ids], dtype=np.float64)
+    w = np.ones(n, dtype=np.float64)   # initialise all strengths to 1
+
+    for iteration in range(_MM_MAX_ITER):   # max 100 iterations
+        w_prev = w.copy()
+        for i in range(n):
+            denominator = np.sum(N[i] / (w[i] + w))
+            if denominator > 0 and win_vec[i] > 0:
+                w[i] = win_vec[i] / denominator
+
+        w = w / w.sum() * n   # re-normalise to avoid numerical drift
+        if np.max(np.abs(w - w_prev)) < _MM_TOL:   # tol = 1e-6
+            break
+
+    return {iid: float(w[idx[iid]]) for iid in item_ids}
+```
+
+No external dependencies — pure numpy. Items with zero wins keep their initial strength of 1 (a small positive constant that prevents division by zero while leaving them at the bottom of the preference ordering).
+
+### Cold-start behaviour
+
+```python
+async def get_preference_scores(user_id: str) -> dict[str, float]:
+    # ... query preference_pairs WHERE user_id = %s ...
+    if not rows:
+        return {}   # cold start — no reranking needed
+    # ... fit Bradley-Terry, return {item_id: strength}
+```
+
+When a user has no preference pairs, `get_preference_scores` returns `{}`. The `rerank` function checks for this immediately:
+
+```python
+def rerank(
+    ranked: list[tuple[Item, float]],
+    preference_scores: dict[str, float],
+    alpha: float = 0.3,
+) -> list[tuple[Item, float]]:
+    if not preference_scores or alpha == 0.0:
+        return ranked   # no-op — returns two-tower order unchanged
+    ...
+```
+
+This makes the reranker safe to call on every request without any conditional logic at the call site. The `recommend()` method always calls both functions:
+
+```python
+# Step 7: Rank candidates via two-tower cosine similarity
+ranked = self.rank(user_embedding, candidates)
+
+# Step 7.5: Preference reranking (no-op when user has no preference pairs)
+pref_scores = await preference_reranker.get_preference_scores(user_id)
+ranked = preference_reranker.rerank(ranked, pref_scores)[:top_k]
+```
+
+### Score blending
+
+The `rerank` function normalises the Bradley-Terry strengths to $[0, 1]$ across the current candidate set, then blends them with the two-tower similarity score:
+
+```python
+def _normalise(s: float) -> float:
+    return (s - min_s) / span if span > 1e-9 else 0.5
+
+for item, sim_score in ranked:
+    raw_strength = preference_scores.get(item.item_id)
+    pref_score = _normalise(raw_strength) if raw_strength is not None else 0.5
+    score = (1.0 - alpha) * sim_score + alpha * pref_score
+```
+
+Items not present in `preference_scores` receive a neutral score of 0.5 — they are neither promoted nor demoted relative to each other.
+
+**Why `alpha=0.3`?** Preference data is sparse and noisy early on. A user's first few preference pairs might not be representative of their general taste. Weighting preferences at 30% gives them meaningful influence without overwhelming the quality signal the two-tower model provides for free. As more pairs accumulate and the Week 8 training pipeline fine-tunes the two-tower weights, you may want to adjust alpha empirically.
+
+---
+
+## 20. Frontend: Wardrobe, Preferences, and Product Cards
+
+### The visibility problem
+
+All of the pipeline work described in sections 1–19 is invisible to users unless there are UI surfaces to expose it. Before adding these surfaces:
+
+- Users had no way to upload wardrobe items → the user embedding always fell back to cold-start style tags
+- There was no way to express pairwise preferences → the Bradley-Terry reranker was always a no-op
+- Recommendations appeared as plain text in the outfit suggestion → no visual product cards, no interaction signals
+
+The frontend additions address all three gaps.
+
+### Wardrobe page (`/wardrobe`)
+
+The wardrobe page has two parts: an upload form and a gallery grid.
+
+**Upload form:** The form uses `hx_encoding="multipart/form-data"` to send the image file alongside the text fields. The target is `#wardrobe-grid` with `hx_swap="afterbegin"` so the new card appears at the top of the gallery without a full page reload:
+
+```python
+Form(
+    Input(type="text", name="name", placeholder="Item name (e.g. Navy Blazer)"),
+    Select(
+        Option("-- category --", value=""),
+        Option("Tops", value="tops"),
+        ...
+        name="category",
+    ),
+    Input(type="file", name="image", accept="image/*"),
+    Button("Add to wardrobe", type="submit"),
+    hx_post="/wardrobe/upload",
+    hx_target="#wardrobe-grid",
+    hx_swap="afterbegin",
+    hx_encoding="multipart/form-data",
+)
+```
+
+**Gallery grid:** CSS grid of wardrobe cards. Each card includes an HTMX delete button:
+
+```python
+def wardrobe_card(item: dict) -> Div:
+    return Div(
+        Img(src=item.get("image_url") or "", cls="wardrobe-card-img"),
+        Div(item["name"], cls="wardrobe-card-name"),
+        Div(item.get("category") or "", cls="wardrobe-card-category"),
+        Button(
+            "✕",
+            hx_delete=f"/wardrobe/{item['item_id']}",
+            hx_confirm="Remove this item from your wardrobe?",
+            hx_target="closest .wardrobe-card",
+            hx_swap="outerHTML swap:0.3s",
+        ),
+        cls="wardrobe-card",
+        id=f"wcard-{item['item_id']}",
+    )
+```
+
+`hx_target="closest .wardrobe-card"` combined with `hx_swap="outerHTML swap:0.3s"` tells HTMX to replace the entire card element with the (empty) response from the delete endpoint, effectively removing it with a brief fade transition.
+
+**Frontend sub-routes:**
+
+- `GET /wardrobe`: fetches items from the backend, renders gallery + upload form
+- `POST /wardrobe/upload`: HTMX fragment — relays multipart upload to backend, returns `wardrobe_card(item)` HTML
+- `DELETE /wardrobe/{item_id}`: calls backend delete, returns empty string (HTMX removes the card element)
+
+### Style preferences form (`/preferences`)
+
+The preferences page maps to the `style_preferences` JSONB column on `user_preferences`. The four fields — styles, colors, occasions, avoid — correspond directly to the keys consumed by `generate_search_query` and `_build_user_embedding`:
+
+```python
+Form(
+    Input(type="text", name="styles", placeholder="e.g. smart casual, streetwear, ivy prep"),
+    Input(type="text", name="colors", placeholder="e.g. navy, white, olive"),
+    Input(type="text", name="occasions", placeholder="e.g. work, weekend, formal"),
+    Input(type="text", name="avoid", placeholder="e.g. loud prints, skinny fit"),
+    Button("Save Preferences", type="submit"),
+    hx_post="/preferences",
+    hx_target="#prefs-feedback",
+    hx_swap="innerHTML",
+)
+Div(id="prefs-feedback")
+```
+
+`hx_target="#prefs-feedback"` with `hx_swap="innerHTML"` means the success/error message from `POST /preferences` replaces the content of the feedback div inline, without a page reload. The user sees "Preferences saved." appear below the form.
+
+### Product cards (home page)
+
+After the outfit suggestion, a "Shop These Looks" section renders a horizontally scrollable row of product cards:
+
+```python
+def product_card(item: dict) -> Div:
+    return Div(
+        Img(src=item.get("image_url") or "", cls="product-card-img"),
+        Div(item["title"], cls="product-card-title"),
+        Div(f"${item['price']:.0f}", cls="product-card-price"),
+        A("View on Poshmark", href=item["product_url"], target="_blank", cls="product-card-link"),
+        Div(
+            Button(
+                "♥",
+                hx_post="/log-interaction",
+                hx_vals=f'{{"item_id":"{item["item_id"]}","interaction_type":"save"}}',
+                hx_swap="none",
+            ),
+            Button(
+                "✕",
+                hx_post="/log-interaction",
+                hx_vals=f'{{"item_id":"{item["item_id"]}","interaction_type":"dismiss"}}',
+                hx_swap="none",
+            ),
+            cls="product-card-actions",
+        ),
+        cls="product-card",
+    )
+```
+
+`hx_swap="none"` on both interaction buttons means the clicks are fire-and-forget: the request is sent, the response is discarded, and the UI does not change. The user sees a clean card with a save heart and a dismiss ✕; the recommendation pipeline records the signal silently.
+
+### Navigation
+
+The nav bar adds "Wardrobe" and "Prefs" links when the user is logged in:
+
+```python
+def nav_bar(session) -> Nav:
+    logged_in = "access_token" in session
+    links = [A("Home", href="/")]
+    if logged_in:
+        links += [A("Wardrobe", href="/wardrobe"), A("Prefs", href="/preferences")]
+        links += [A("Logout", href="/logout")]
+    else:
+        links += [A("Login", href="/login"), A("Sign up", href="/register")]
+    return Nav(*links, cls="nav-bar")
+```
 
 ---
 
@@ -2258,13 +2783,18 @@ The `preference_context` stub in `FashionDomain` is a placeholder for the Week 8
 | `app/services/dev_catalog_service.py` | ANN search on Poshmark `catalog_items` |
 | `app/services/llm_service.py` | `generate_search_query` + `generate_explanation` (additions) |
 | `app/services/recommendation_service.py` | `UserTower`, `ItemTower`, `RecommendationService` |
-| `app/main.py` | `GET /catalog/search`, `POST /recommend-products` (additions) |
+| `app/main.py` | `GET /catalog/search`, `POST /recommend-products`, wardrobe, interaction, and preference-pair endpoints |
 | `scripts/backfill_catalog_embeddings.py` | One-time script to embed the Poshmark catalog |
 | `tests/test_embedding_service.py` | CLIP encoding tests (mock open_clip) |
 | `tests/test_domain.py` | FashionDomain + factory tests |
 | `tests/test_vector_cache.py` | Cache lookup/store tests (mock psycopg3 + S3) |
 | `tests/test_dev_catalog_service.py` | ANN search + recency fallback tests |
 | `tests/test_recommendation_service.py` | Tower init/forward, rank ordering, full pipeline |
+| `app/models/wardrobe.py` | `WardrobeItemCreate`, `WardrobeItemResponse` Pydantic models |
+| `app/services/wardrobe_service.py` | Async CRUD for `wardrobe_items` — create, list, get, delete |
+| `app/services/preference_reranker.py` | Bradley-Terry MM reranker + `get_preference_scores` |
+| `tests/test_wardrobe_service.py` | Wardrobe CRUD tests (mock psycopg3) |
+| `tests/test_preference_reranker.py` | Bradley-Terry MM + rerank blending tests |
 
 ---
 
@@ -2277,3 +2807,8 @@ The following sections were added after the initial implementation draft:
 - **Section 11 — User signal sources**: individual wardrobe item photos, VLM-assisted outfit photo tagging with user verification, and style preference tags; weighted combination into the user embedding
 - **Section 15 — Late Interaction Reranking**: ColPali patch embeddings, MaxSim scoring, storage trade-offs, and the two-stage retrieval pipeline; patch backfill runs locally on RTX 3080 with int8 quantization and a two-phase download-then-process approach
 - **Section 16 — Future Architecture Directions**: bimodal wardrobe problem and multi-vector user representations, generative retrieval, LLM rerankers, and the Bradley-Terry preference reranker
+- **Sections 17–20** — implementation of the surrounding user-signal infrastructure:
+  - **Section 17**: Wardrobe CRUD service — S3 image upload flow, `wardrobe_service.py`, `storage_service` additions, API endpoints
+  - **Section 18**: Interaction logging — `user_interactions` and `preference_pairs` schemas, fire-and-forget HTMX pattern for frontend interaction buttons
+  - **Section 19**: Bradley-Terry preference reranker — MM algorithm (pure numpy), cold-start no-op, score blending with `alpha=0.3`, integration point in `RecommendationService.recommend()`
+  - **Section 20**: Frontend surfaces — wardrobe gallery + upload form, style preferences form, product cards with save/dismiss buttons, nav bar updates

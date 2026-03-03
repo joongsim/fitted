@@ -345,8 +345,14 @@ class RecommendationService:
         # Step 6: Build the user embedding
         user_embedding = await self._build_user_embedding(user_id, style_preferences)
 
-        # Step 7: Rank candidates
-        ranked = self.rank(user_embedding, candidates)[:top_k]
+        # Step 7: Rank candidates via two-tower cosine similarity
+        ranked = self.rank(user_embedding, candidates)
+
+        # Step 7.5: Preference reranking (no-op when user has no preference pairs)
+        from app.services import preference_reranker
+
+        pref_scores = await preference_reranker.get_preference_scores(user_id)
+        ranked = preference_reranker.rerank(ranked, pref_scores)[:top_k]
 
         # Step 8: Optional LLM explanation
         explanation = ""

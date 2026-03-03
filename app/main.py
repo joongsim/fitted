@@ -6,7 +6,17 @@ import os
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Query, Depends, Response, status
+from fastapi import (
+    FastAPI,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Depends,
+    Response,
+    UploadFile,
+    status,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordRequestForm
 import asyncio
@@ -610,3 +620,238 @@ async def recommend_products(
     except Exception:
         logger.error("Recommendation failed: user_id=%s", user_id, exc_info=True)
         raise HTTPException(status_code=500, detail="Recommendation pipeline failed")
+
+
+# --- Wardrobe Endpoints ---
+
+
+@app.get("/wardrobe")
+async def list_wardrobe(
+    user_id: str = Depends(auth.get_current_user_id),
+) -> dict:
+    """
+    Return all wardrobe items for the authenticated user.
+
+    Each item includes a presigned S3 URL (1 h expiry) when an image exists.
+    """
+    from app.services import wardrobe_service
+    from app.services.storage_service import get_image_presigned_url
+    from app.models.wardrobe import WardrobeItemResponse
+
+    items = await wardrobe_service.get_wardrobe_items(user_id)
+    results = []
+    for item in items:
+        image_url = None
+        if item["image_s3_key"]:
+            image_url = get_image_presigned_url(item["image_s3_key"])
+        results.append(
+            WardrobeItemResponse(
+                item_id=item["item_id"],
+                name=item["name"],
+                category=item["category"],
+                image_url=image_url,
+                tags=item["tags"],
+                created_at=item["created_at"],
+            ).model_dump()
+        )
+
+    logger.info("GET /wardrobe: user_id=%s -> %d items", user_id, len(results))
+    return {"count": len(results), "items": results}
+
+
+@app.post("/wardrobe", status_code=status.HTTP_201_CREATED)
+async def add_wardrobe_item(
+    name: str = Form(..., min_length=1, max_length=255),
+    category: Optional[str] = Form(None),
+    image: Optional[UploadFile] = File(None),
+    user_id: str = Depends(auth.get_current_user_id),
+) -> dict:
+    """
+    Create a new wardrobe item (multipart/form-data).
+
+    Accepts ``name`` and optional ``category`` as form fields, and an optional
+    ``image`` file upload.  The image is written to S3 at
+    ``wardrobe-images/{user_id}/{item_id}.jpg``; the S3 key is stored on the row.
+    The CLIP embedding column is NULL until the wardrobe backfill script runs.
+    """
+    from app.services import wardrobe_service
+    from app.services.storage_service import (
+        upload_wardrobe_image,
+        get_image_presigned_url,
+    )
+    from app.models.wardrobe import WardrobeItemResponse
+    import uuid
+
+    logger.info(
+        "POST /wardrobe: user_id=%s name=%r category=%s has_image=%s",
+        user_id,
+        name,
+        category,
+        image is not None,
+    )
+
+    # Generate the item_id first so the S3 key is predictable
+    item_id_str = str(uuid.uuid4())
+    image_s3_key = None
+
+    if image and image.filename:
+        file_content = await image.read()
+        content_type = image.content_type or "image/jpeg"
+        image_s3_key = upload_wardrobe_image(
+            file_content=file_content,
+            content_type=content_type,
+            user_id=user_id,
+            item_id=item_id_str,
+        )
+
+    item = await wardrobe_service.create_wardrobe_item(
+        user_id=user_id,
+        name=name,
+        category=category,
+        image_s3_key=image_s3_key,
+    )
+
+    image_url = get_image_presigned_url(image_s3_key) if image_s3_key else None
+    return WardrobeItemResponse(
+        item_id=item["item_id"],
+        name=item["name"],
+        category=item["category"],
+        image_url=image_url,
+        tags=item["tags"],
+        created_at=item["created_at"],
+    ).model_dump()
+
+
+@app.delete("/wardrobe/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_wardrobe_item(
+    item_id: str,
+    user_id: str = Depends(auth.get_current_user_id),
+) -> None:
+    """
+    Delete a wardrobe item.
+
+    Ownership is enforced: users can only delete their own items.  Returns 404
+    when the item does not exist or belongs to a different user.
+    """
+    from app.services import wardrobe_service
+
+    deleted = await wardrobe_service.delete_wardrobe_item(
+        user_id=user_id, item_id=item_id
+    )
+    if not deleted:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Wardrobe item not found"
+        )
+    logger.info("DELETE /wardrobe/%s: deleted by user_id=%s", item_id, user_id)
+
+
+# --- Interaction Logging Endpoints ---
+
+
+class InteractionCreate(BaseModel):
+    """Body for POST /interactions."""
+
+    item_id: str
+    interaction_type: str  # 'click' | 'save' | 'dismiss'
+    weather_context: dict = {}
+    query_text: Optional[str] = None
+
+
+@app.post("/interactions", status_code=status.HTTP_201_CREATED)
+async def log_interaction(
+    body: InteractionCreate,
+    user_id: str = Depends(auth.get_current_user_id),
+) -> dict:
+    """
+    Log a user interaction (click, save, or dismiss) with a catalog item.
+
+    These signals feed the Week 8 training pipeline.  The endpoint is designed
+    to be called fire-and-forget from the frontend (``hx_swap="none"``), so it
+    returns a minimal 201 response.
+
+    Authentication is required: user_id is derived from the JWT so a user can
+    only log interactions for themselves (no IDOR).
+    """
+    if body.interaction_type not in ("click", "save", "dismiss"):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="interaction_type must be one of: click, save, dismiss",
+        )
+
+    async with db_service.get_connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                INSERT INTO user_interactions
+                    (user_id, item_id, interaction_type, weather_context, query_text)
+                VALUES (%s, %s, %s, %s, %s)
+                """,
+                (
+                    user_id,
+                    body.item_id,
+                    body.interaction_type,
+                    body.weather_context,
+                    body.query_text,
+                ),
+            )
+            await conn.commit()
+
+    logger.info(
+        "POST /interactions: user_id=%s item_id=%s type=%s",
+        user_id,
+        body.item_id,
+        body.interaction_type,
+    )
+    return {"status": "logged"}
+
+
+# --- Preference Pair Endpoints ---
+
+
+class PreferencePairCreate(BaseModel):
+    """Body for POST /preferences/pairs."""
+
+    item_a_id: str
+    item_b_id: str
+    preferred: str  # 'a' | 'b'
+
+
+@app.post("/preferences/pairs", status_code=status.HTTP_201_CREATED)
+async def record_preference_pair(
+    body: PreferencePairCreate,
+    user_id: str = Depends(auth.get_current_user_id),
+) -> dict:
+    """
+    Record a pairwise preference signal ("I prefer item A over item B").
+
+    These signals feed the Bradley-Terry preference reranker
+    (``preference_reranker.py``) and the Week 8 training pipeline.
+
+    Authentication required: user_id is from the JWT.
+    """
+    if body.preferred not in ("a", "b"):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="preferred must be 'a' or 'b'",
+        )
+
+    async with db_service.get_connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                INSERT INTO preference_pairs
+                    (user_id, item_a_id, item_b_id, preferred)
+                VALUES (%s, %s, %s, %s)
+                """,
+                (user_id, body.item_a_id, body.item_b_id, body.preferred),
+            )
+            await conn.commit()
+
+    logger.info(
+        "POST /preferences/pairs: user_id=%s a=%s b=%s preferred=%s",
+        user_id,
+        body.item_a_id,
+        body.item_b_id,
+        body.preferred,
+    )
+    return {"status": "recorded"}

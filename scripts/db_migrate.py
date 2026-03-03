@@ -160,6 +160,37 @@ CREATE INDEX IF NOT EXISTS idx_query_cache_embedding
 -- Index on expires_at for efficient cleanup of expired cache entries
 CREATE INDEX IF NOT EXISTS idx_query_cache_expires
     ON query_cache (expires_at);
+
+-- User interaction signals — raw click/save/dismiss events from recommendation results.
+-- These feed the Week 8 training pipeline (triplet construction for TripletMarginLoss).
+CREATE TABLE IF NOT EXISTS user_interactions (
+    interaction_id   UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id          UUID REFERENCES users(user_id) ON DELETE CASCADE,
+    item_id          TEXT REFERENCES catalog_items(item_id),
+    interaction_type VARCHAR NOT NULL CHECK (interaction_type IN ('click', 'save', 'dismiss')),
+    weather_context  JSONB DEFAULT '{}',  -- {temp_c, condition, location} at time of interaction
+    query_text       TEXT,                -- the LLM-generated search query that surfaced this item
+    created_at       TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Composite index: user timeline queries used by the training pipeline
+CREATE INDEX IF NOT EXISTS idx_interactions_user
+    ON user_interactions (user_id, created_at DESC);
+
+-- Pairwise preference signals — "I prefer item A over item B".
+-- These feed the Bradley-Terry preference reranker (preference_reranker.py).
+CREATE TABLE IF NOT EXISTS preference_pairs (
+    pair_id    UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id    UUID REFERENCES users(user_id) ON DELETE CASCADE,
+    item_a_id  TEXT REFERENCES catalog_items(item_id),
+    item_b_id  TEXT REFERENCES catalog_items(item_id),
+    preferred  VARCHAR NOT NULL CHECK (preferred IN ('a', 'b')),
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Index for per-user Bradley-Terry model fitting
+CREATE INDEX IF NOT EXISTS idx_pairs_user
+    ON preference_pairs (user_id);
 """
 
 

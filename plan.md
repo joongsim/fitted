@@ -1,6 +1,6 @@
 # Fitted — Engineering Plan
 
-**Status:** Week 4 in progress  
+**Status:** Week 6 core complete — preference reranker + interaction endpoints pending
 **Stack:** FastHTML on EC2 · FastAPI on Lambda · PostgreSQL + pgvector on RDS · S3 · CLIP ViT-B/32
 
 ---
@@ -233,43 +233,53 @@ Pydantic validation, forecast support, FastHTML frontend, S3-backed caching.
 
 **Cost:** $0 during free tier · ~$3.60/mo Elastic IP · ~$18/mo post-free-tier
 
-### Week 5 — Embeddings + Candidate Sources
+### ✅ Week 5 — Embeddings + Candidate Sources
+
 **5A — CLIP Embedding Service**
-- [ ] `app/services/embedding_service.py` — CLIP ViT-B/32 FastAPI microservice on EC2; `encode_image(url_or_s3_key)`, `encode_text(text)` → `np.ndarray`
-- [ ] `scripts/backfill_wardrobe_embeddings.py` — backfill `wardrobe_items.embedding` for existing photos
-- [ ] Tests: `tests/test_embedding_service.py`
+- [x] `app/services/embedding_service.py` — CLIP ViT-B/32 text encoder; lazy-import singleton; `encode_text(text) -> np.ndarray` (512-dim L2-normalized); `reset_model_for_testing()`
+- [ ] `scripts/backfill_wardrobe_embeddings.py` — backfill `wardrobe_items.embedding` for existing photos (deferred; no wardrobe photos exist yet)
+- [ ] `encode_image(url_or_s3_key)` — image encoder path (deferred; Lambda 250MB limit; will run on EC2 sidecar)
 
 **5A.5 — Domain Protocol**
-- [ ] `app/services/domain.py` — `Domain` Protocol
-- [ ] `app/models/item.py` — canonical `Item` dataclass
-- [ ] `app/services/domains/fashion.py` — `FashionDomain`
-- [ ] `app/services/domain_factory.py` — factory via `DOMAIN` env var
-- [ ] Tests: `tests/test_domain.py`
+- [x] `app/services/domain.py` — `@runtime_checkable` `Domain` Protocol with `encode_query`, `encode_item`, `parse_item`, `preference_context`
+- [x] `app/models/item.py` — canonical `Item` dataclass (512-dim `np.ndarray | None` embedding)
+- [x] `app/services/domains/fashion.py` — `FashionDomain`: composite weather+style query strings, cached embedding fast path, DB row parsing
+- [x] `app/services/domain_factory.py` — `_REGISTRY` dict + `get_domain(name)` factory via `DOMAIN` env var
 
-**5B — Dev Catalog (SerpAPI seed, ~30 queries)**
-- [ ] `scripts/seed_dev_catalog.py` — run ~30 curated queries ("navy blazer men", "white sneakers women", etc.), bronze S3 → parse → CLIP encode → bulk insert `catalog_items` with `source='seed'`
-- [ ] `app/services/dev_catalog_service.py` — `CandidateSource` impl; pgvector ANN on `catalog_items` filtered by `source='seed'`; used when `DEV_MODE=true`
-- [ ] Tests: `tests/test_dev_catalog_service.py`
+**5B — Dev Catalog (Poshmark seed)**
+- [x] Poshmark ingestion scripts — seeded `catalog_items` with Poshmark listings (`source='poshmark_seed'`)
+- [x] `scripts/backfill_catalog_embeddings.py` — CLIP text-encodes all `catalog_items` where `embedding IS NULL`; idempotent; run via SSH tunnel to RDS; **backfill complete**
+- [x] `app/services/dev_catalog_service.py` — pgvector ANN on `catalog_items` (embedding IS NOT NULL); recency fallback; used when `DEV_MODE=true`
 
-**5C — SerpAPI Prod Source + Vector Cache**
-- [ ] `app/services/serpapi_service.py` — `CandidateSource` impl; per result: persist thumbnail → S3 `images/fashion/{product_id}.webp`, check `catalog_items` by `product_id`, encode missing items, upsert
-- [ ] `app/services/vector_cache.py` — `lookup(query_embedding, threshold=0.85)`, `store(query_embedding, results)`; HNSW search on `query_cache`
-- [ ] `app/services/candidate_source.py` — factory: `DEV_MODE=true` → dev catalog, prod → vector cache → SerpAPI
-- [ ] Extend `llm_service.py`: `generate_search_query(preferences, weather, wardrobe_summary) -> str`
-- [ ] Add to `pyproject.toml`: `google-search-results>=2.4.2`, `Pillow>=10.0.0`, `open-clip-torch`
-- [ ] Tests: `tests/test_serpapi_service.py`, `tests/test_vector_cache.py`
+**5C — Vector Cache + LLM Query Generation**
+- [x] `app/services/vector_cache.py` — `lookup(query_embedding, threshold=0.15)` + `store(...)`; cosine distance ANN on `query_cache`; S3-backed candidate serialization; 24h TTL; `ON CONFLICT` upsert
+- [x] `app/services/candidate_source.py` — factory routing `DEV_MODE=true` → dev catalog; prod path stub (returns `[]` with warning)
+- [x] `llm_service.generate_search_query(preferences, weather) -> str` — 5–10 word NL query; rule-based fallback
+- [ ] `app/services/serpapi_service.py` — live product search for prod path (deferred to Week 5C remainder)
 
-### Week 6 — Two-Towers + Preference Re-ranker
-- [ ] `app/services/recommendation_service.py` — `UserTower(pref_dim=512, wardrobe_dim=512)`, `ItemTower(clip_dim=512)`, both projecting to 512-dim; weights at `s3://fitted/models/two-towers/latest.pt`; Xavier init on first run
+### 🔄 Week 6 — Two-Towers + Preference Re-ranker
+
+**Two-Tower Model (complete)**
+- [x] `app/models/product.py` — `ProductRecommendation` Pydantic model with `similarity_score`, optional `llm_explanation`
+- [x] `app/services/recommendation_service.py`:
+  - `UserTower` / `ItemTower` — 512→512 linear projection; Xavier uniform init; loads pre-trained weights from `s3://fitted/models/two-towers/latest.pt`
+  - `RecommendationService._build_user_embedding` — mean-pools wardrobe embeddings; falls back to style/color tag encoding; falls back to generic "casual everyday clothing"
+  - `RecommendationService.rank` — encodes items via `FashionDomain.encode_item`, projects through `ItemTower`, scores by dot product (cosine similarity)
+  - `RecommendationService.recommend` — full pipeline: LLM query → CLIP embed → vector cache → ANN → rank → optional explanation → `ProductRecommendation` list
+  - Module-level singleton: `init_recommendation_service()` / `get_recommendation_service()`
+- [x] `app/main.py` — lifespan calls `init_recommendation_service()` after DB pool; `GET /catalog/search`; `POST /recommend-products` (JWT-authenticated; weather + prefs fetched concurrently)
+- [x] `tests/test_recommendation_service.py` — 31 tests across UserTower, ItemTower, `rank`, `_build_user_embedding`, `recommend`, singleton lifecycle
+- [x] `llm_service.generate_explanation(top_items, weather_context, style_preferences) -> str` — 2–3 sentence explanation; gated behind `include_explanation=True`
+
+**Pending**
 - [ ] `app/services/preference_reranker.py` — Bradley-Terry on `preference_pairs`; `rerank(query, candidates)`, `update(pairs)`
-- [ ] `scripts/pretrain_item_tower.py` — pre-train on dev catalog embeddings
-- [ ] `app/models/product.py` — `ProductRecommendation(title, price, link, thumbnail, similarity_score, preference_score, llm_explanation?)`
-- [ ] `POST /recommend-products`; `include_products: bool = False` on existing `/suggest-outfit` for backward compat
-- [ ] `POST /interactions`, `POST /preferences/pairs`
-- [ ] Tests: `tests/test_recommendation_service.py`, `tests/test_preference_reranker.py`
+- [ ] `POST /interactions` — log click/save/dismiss events to `user_interactions`
+- [ ] `POST /preferences/pairs` — record pairwise preference signals
+- [ ] `tests/test_preference_reranker.py`
+- [ ] `scripts/pretrain_item_tower.py` — pre-train ItemTower on dev catalog embeddings (optional; Xavier init acceptable until Week 8)
 
 ### Week 7 — LLM Explanation + Product Cards
-- [ ] Extend `llm_service.get_outfit_suggestion` to accept `top_products: list[dict]`; narrate top-3 picks
+- [x] `llm_service.generate_explanation` — narrates top-3 picks (implemented in Week 6 alongside `recommend`)
 - [ ] `product_card(product) -> Div` in `frontend/app.py`; HTMX click → `POST /interactions`
 
 ### Week 8 — Training Pipeline
@@ -304,8 +314,9 @@ Pydantic validation, forecast support, FastHTML frontend, S3-backed caching.
 |---|---|---|
 | Embedding model | CLIP ViT-B/32 (512-dim) | Unified image+text space; no fusion layer needed |
 | CLIP deployment | EC2 sidecar, not Lambda | Lambda 250MB limit + cold start latency |
-| Dev catalog | ~30 SerpAPI seed queries | Real product data, no external dataset dependency |
-| Vector cache | pgvector semantic lookup (threshold 0.85) | Reuse embeddings for similar queries; cut SerpAPI costs |
+| Dev catalog | Poshmark seed (ingestion scripts) | Real secondhand listings; no SerpAPI spend during dev |
+| Vector cache | pgvector cosine distance threshold 0.15 (≈ similarity 0.85) | Reuse candidates for semantically similar queries; cut CLIP encode cost |
+| Two-tower init | Xavier uniform (cold start) | Retrieval is semantically meaningful; ranking quality improves after Week 8 training |
 | ML platform | S3 + dbt + Airflow on EC2 | No need for Databricks at this scale |
 | Multi-vertical | Domain Protocol | Swap fashion → furniture via config; B2B story |
 | Re-ranker | Bradley-Terry on preference pairs | Separates objective relevance (two-towers) from subjective taste |

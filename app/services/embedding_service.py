@@ -1,7 +1,6 @@
 """CLIP ViT-B/32 text encoder with lazy import and module-level singleton cache."""
 
 import logging
-from typing import Optional
 
 import numpy as np
 

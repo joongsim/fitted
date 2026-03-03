@@ -320,6 +320,7 @@ _PATCH_CACHE_STORE = "app.services.vector_cache.store"
 _PATCH_CATALOG = "app.services.dev_catalog_service.search"
 _PATCH_CONN = "app.services.recommendation_service.get_connection"
 _PATCH_EXPLAIN = "app.services.llm_service.generate_explanation"
+_PATCH_PREF_SCORES = "app.services.preference_reranker.get_preference_scores"
 
 
 
@@ -373,6 +374,9 @@ class TestRecommend:
             stack.enter_context(
                 patch(_PATCH_CONN, return_value=_mock_get_connection(mock_conn))
             )
+            stack.enter_context(
+                patch(_PATCH_PREF_SCORES, new=AsyncMock(return_value={}))
+            )
             result = await svc.recommend(
                 user_id="u1",
                 location="London",
@@ -405,6 +409,9 @@ class TestRecommend:
             stack.enter_context(
                 patch(_PATCH_CONN, return_value=_mock_get_connection(mock_conn))
             )
+            stack.enter_context(
+                patch(_PATCH_PREF_SCORES, new=AsyncMock(return_value={}))
+            )
             result = await svc.recommend(
                 user_id="u1",
                 location="NYC",
@@ -432,6 +439,9 @@ class TestRecommend:
             stack.enter_context(patch(_PATCH_CATALOG, new=mock_catalog))
             stack.enter_context(
                 patch(_PATCH_CONN, return_value=_mock_get_connection(mock_conn))
+            )
+            stack.enter_context(
+                patch(_PATCH_PREF_SCORES, new=AsyncMock(return_value={}))
             )
             result = await svc.recommend(
                 user_id="u1",
@@ -463,6 +473,9 @@ class TestRecommend:
             stack.enter_context(
                 patch(_PATCH_CONN, return_value=_mock_get_connection(mock_conn))
             )
+            stack.enter_context(
+                patch(_PATCH_PREF_SCORES, new=AsyncMock(return_value={}))
+            )
             await svc.recommend(
                 user_id="u1",
                 location="SF",
@@ -491,6 +504,9 @@ class TestRecommend:
             )
             stack.enter_context(
                 patch(_PATCH_CONN, return_value=_mock_get_connection(mock_conn))
+            )
+            stack.enter_context(
+                patch(_PATCH_PREF_SCORES, new=AsyncMock(return_value={}))
             )
             stack.enter_context(
                 patch(
@@ -528,6 +544,9 @@ class TestRecommend:
             stack.enter_context(
                 patch(_PATCH_CONN, return_value=_mock_get_connection(mock_conn))
             )
+            stack.enter_context(
+                patch(_PATCH_PREF_SCORES, new=AsyncMock(return_value={}))
+            )
             result = await svc.recommend(
                 user_id="u1",
                 location="Paris",
@@ -557,6 +576,9 @@ class TestRecommend:
             )
             stack.enter_context(
                 patch(_PATCH_CONN, return_value=_mock_get_connection(mock_conn))
+            )
+            stack.enter_context(
+                patch(_PATCH_PREF_SCORES, new=AsyncMock(return_value={}))
             )
             result = await svc.recommend(
                 user_id="u1",
