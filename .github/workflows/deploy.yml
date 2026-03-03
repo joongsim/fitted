@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 jobs:
-  deploy:
+  test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
@@ -17,7 +17,70 @@ jobs:
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v2
         with:
-          # Replace with your actual Role ARN
+          role-to-assume: arn:aws:iam::903558039846:role/github_actions
+          aws-region: us-west-1
+
+      - name: Run tests on EC2 via SSM
+        run: |
+          BRANCH="${{ github.ref_name }}"
+          if [[ ! "$BRANCH" =~ ^[a-zA-Z0-9/_.-]+$ ]]; then
+            echo "Invalid branch name: $BRANCH"
+            exit 1
+          fi
+
+          COMMAND_ID=$(aws ssm send-command \
+            --region us-west-1 \
+            --instance-ids "${{ secrets.EC2_INSTANCE_ID }}" \
+            --document-name "AWS-RunShellScript" \
+            --parameters "commands=[\"runuser -l ec2-user -c 'cd /home/ec2-user/fitted && git fetch origin && git checkout $BRANCH && git pull origin $BRANCH && source .venv/bin/activate && bash ./run_tests.sh'\"]" \
+            --query 'Command.CommandId' \
+            --output text)
+
+          echo "SSM Command ID: $COMMAND_ID"
+
+          # Wait for completion; ignore waiter exit code so we always print output
+          aws ssm wait command-executed \
+            --region us-west-1 \
+            --command-id "$COMMAND_ID" \
+            --instance-id "${{ secrets.EC2_INSTANCE_ID }}" || true
+
+          STATUS=$(aws ssm get-command-invocation \
+            --region us-west-1 \
+            --command-id "$COMMAND_ID" \
+            --instance-id "${{ secrets.EC2_INSTANCE_ID }}" \
+            --query 'Status' \
+            --output text)
+
+          echo "--- STDOUT ---"
+          aws ssm get-command-invocation \
+            --region us-west-1 \
+            --command-id "$COMMAND_ID" \
+            --instance-id "${{ secrets.EC2_INSTANCE_ID }}" \
+            --query 'StandardOutputContent' \
+            --output text
+
+          echo "--- STDERR ---"
+          aws ssm get-command-invocation \
+            --region us-west-1 \
+            --command-id "$COMMAND_ID" \
+            --instance-id "${{ secrets.EC2_INSTANCE_ID }}" \
+            --query 'StandardErrorContent' \
+            --output text
+
+          if [ "$STATUS" != "Success" ]; then
+            echo "Tests failed with status: $STATUS"
+            exit 1
+          fi
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
           role-to-assume: arn:aws:iam::903558039846:role/github_actions
           aws-region: us-west-1
 
