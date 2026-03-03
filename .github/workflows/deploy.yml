@@ -32,7 +32,7 @@ jobs:
             --region us-west-1 \
             --instance-ids "${{ secrets.EC2_INSTANCE_ID }}" \
             --document-name "AWS-RunShellScript" \
-            --parameters "commands=[\"runuser -l ec2-user -c 'cd /home/ec2-user/fitted && git fetch origin && git checkout $BRANCH && git pull origin $BRANCH && source .venv/bin/activate && bash ./run_tests.sh'\"]" \
+            --parameters "commands=[\"runuser -l ec2-user -c 'cd /home/ec2-user/fitted && git fetch origin && git checkout $BRANCH && git pull origin $BRANCH && PYTHONPATH=. .venv/bin/pytest tests/ -v'\"]" \
             --query 'Command.CommandId' \
             --output text)
 
