@@ -3,6 +3,7 @@
 All external dependencies (DB, weather service, LLM service, analysis service)
 are mocked so no real network or database calls are made.
 """
+
 import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -57,10 +58,13 @@ def client():
 
     with patch("app.main.db_service.init_pool", new_callable=AsyncMock):
         with patch("app.main.db_service.close_pool", new_callable=AsyncMock):
-            from app.main import app
+            with patch(
+                "app.services.recommendation_service.init_recommendation_service"
+            ):
+                from app.main import app
 
-            with TestClient(app, raise_server_exceptions=False) as c:
-                yield c
+                with TestClient(app, raise_server_exceptions=False) as c:
+                    yield c
 
 
 # ---------------------------------------------------------------------------
@@ -94,17 +98,37 @@ class TestRoot:
 
 class TestRegister:
     def test_successful_registration_returns_200(self, client):
-        with patch("app.main.user_service.get_user_by_email", new_callable=AsyncMock, return_value=None):
-            with patch("app.main.user_service.create_user", new_callable=AsyncMock, return_value=MOCK_USER_OBJ):
+        with patch(
+            "app.main.user_service.get_user_by_email",
+            new_callable=AsyncMock,
+            return_value=None,
+        ):
+            with patch(
+                "app.main.user_service.create_user",
+                new_callable=AsyncMock,
+                return_value=MOCK_USER_OBJ,
+            ):
                 response = client.post(
                     "/auth/register",
-                    json={"email": MOCK_USER_EMAIL, "password": "Password123", "full_name": MOCK_USER_FULL_NAME},
+                    json={
+                        "email": MOCK_USER_EMAIL,
+                        "password": "Password123",
+                        "full_name": MOCK_USER_FULL_NAME,
+                    },
                 )
         assert response.status_code == 200
 
     def test_successful_registration_returns_user_data(self, client):
-        with patch("app.main.user_service.get_user_by_email", new_callable=AsyncMock, return_value=None):
-            with patch("app.main.user_service.create_user", new_callable=AsyncMock, return_value=MOCK_USER_OBJ):
+        with patch(
+            "app.main.user_service.get_user_by_email",
+            new_callable=AsyncMock,
+            return_value=None,
+        ):
+            with patch(
+                "app.main.user_service.create_user",
+                new_callable=AsyncMock,
+                return_value=MOCK_USER_OBJ,
+            ):
                 response = client.post(
                     "/auth/register",
                     json={"email": MOCK_USER_EMAIL, "password": "Password123"},
@@ -140,8 +164,16 @@ class TestRegister:
         assert response.status_code == 422
 
     def test_create_user_returns_none_gives_500(self, client):
-        with patch("app.main.user_service.get_user_by_email", new_callable=AsyncMock, return_value=None):
-            with patch("app.main.user_service.create_user", new_callable=AsyncMock, return_value=None):
+        with patch(
+            "app.main.user_service.get_user_by_email",
+            new_callable=AsyncMock,
+            return_value=None,
+        ):
+            with patch(
+                "app.main.user_service.create_user",
+                new_callable=AsyncMock,
+                return_value=None,
+            ):
                 response = client.post(
                     "/auth/register",
                     json={"email": MOCK_USER_EMAIL, "password": "Password123"},
@@ -156,9 +188,15 @@ class TestRegister:
 
 class TestLogin:
     def test_successful_login_returns_200_and_token(self, client):
-        with patch("app.main.user_service.get_user_by_email", new_callable=AsyncMock, return_value=MOCK_USER_DB_ROW):
+        with patch(
+            "app.main.user_service.get_user_by_email",
+            new_callable=AsyncMock,
+            return_value=MOCK_USER_DB_ROW,
+        ):
             with patch("app.main.auth.verify_password", return_value=True):
-                with patch("app.main.user_service.update_last_login", new_callable=AsyncMock):
+                with patch(
+                    "app.main.user_service.update_last_login", new_callable=AsyncMock
+                ):
                     response = client.post(
                         "/auth/login",
                         data={"username": MOCK_USER_EMAIL, "password": "Password123"},
@@ -169,9 +207,15 @@ class TestLogin:
         assert data["token_type"] == "bearer"
 
     def test_successful_login_sets_http_only_cookie(self, client):
-        with patch("app.main.user_service.get_user_by_email", new_callable=AsyncMock, return_value=MOCK_USER_DB_ROW):
+        with patch(
+            "app.main.user_service.get_user_by_email",
+            new_callable=AsyncMock,
+            return_value=MOCK_USER_DB_ROW,
+        ):
             with patch("app.main.auth.verify_password", return_value=True):
-                with patch("app.main.user_service.update_last_login", new_callable=AsyncMock):
+                with patch(
+                    "app.main.user_service.update_last_login", new_callable=AsyncMock
+                ):
                     response = client.post(
                         "/auth/login",
                         data={"username": MOCK_USER_EMAIL, "password": "Password123"},
@@ -179,7 +223,11 @@ class TestLogin:
         assert "access_token" in response.cookies
 
     def test_wrong_password_returns_401(self, client):
-        with patch("app.main.user_service.get_user_by_email", new_callable=AsyncMock, return_value=MOCK_USER_DB_ROW):
+        with patch(
+            "app.main.user_service.get_user_by_email",
+            new_callable=AsyncMock,
+            return_value=MOCK_USER_DB_ROW,
+        ):
             with patch("app.main.auth.verify_password", return_value=False):
                 response = client.post(
                     "/auth/login",
@@ -188,7 +236,11 @@ class TestLogin:
         assert response.status_code == 401
 
     def test_unknown_email_returns_401(self, client):
-        with patch("app.main.user_service.get_user_by_email", new_callable=AsyncMock, return_value=None):
+        with patch(
+            "app.main.user_service.get_user_by_email",
+            new_callable=AsyncMock,
+            return_value=None,
+        ):
             response = client.post(
                 "/auth/login",
                 data={"username": "nobody@example.com", "password": "pw"},
@@ -197,7 +249,11 @@ class TestLogin:
 
     def test_inactive_user_returns_400(self, client):
         inactive_user = {**MOCK_USER_DB_ROW, "is_active": False}
-        with patch("app.main.user_service.get_user_by_email", new_callable=AsyncMock, return_value=inactive_user):
+        with patch(
+            "app.main.user_service.get_user_by_email",
+            new_callable=AsyncMock,
+            return_value=inactive_user,
+        ):
             with patch("app.main.auth.verify_password", return_value=True):
                 response = client.post(
                     "/auth/login",
@@ -231,7 +287,11 @@ class TestLogout:
 
 class TestGetMe:
     def test_valid_token_returns_user(self, client):
-        with patch("app.main.user_service.get_user_by_id", new_callable=AsyncMock, return_value=MOCK_USER_OBJ):
+        with patch(
+            "app.main.user_service.get_user_by_id",
+            new_callable=AsyncMock,
+            return_value=MOCK_USER_OBJ,
+        ):
             with patch.dict(os.environ, {"DEV_MODE": "false"}):
                 response = client.get("/users/me", headers=_auth_headers())
         assert response.status_code == 200
@@ -243,13 +303,21 @@ class TestGetMe:
         assert response.status_code == 401
 
     def test_user_not_found_in_db_returns_404(self, client):
-        with patch("app.main.user_service.get_user_by_id", new_callable=AsyncMock, return_value=None):
+        with patch(
+            "app.main.user_service.get_user_by_id",
+            new_callable=AsyncMock,
+            return_value=None,
+        ):
             with patch.dict(os.environ, {"DEV_MODE": "false"}):
                 response = client.get("/users/me", headers=_auth_headers())
         assert response.status_code == 404
 
     def test_dev_mode_bypasses_auth(self, client):
-        with patch("app.main.user_service.get_user_by_id", new_callable=AsyncMock, return_value=MOCK_USER_OBJ):
+        with patch(
+            "app.main.user_service.get_user_by_id",
+            new_callable=AsyncMock,
+            return_value=MOCK_USER_OBJ,
+        ):
             with patch.dict(os.environ, {"DEV_MODE": "true"}):
                 response = client.get("/users/me")
         assert response.status_code == 200
@@ -263,7 +331,11 @@ class TestGetMe:
 class TestGetPreferences:
     def test_returns_preferences_with_valid_token(self, client):
         prefs = {"style_preferences": {"style": "casual"}, "size_info": {"shirt": "M"}}
-        with patch("app.main.user_service.get_user_preferences", new_callable=AsyncMock, return_value=prefs):
+        with patch(
+            "app.main.user_service.get_user_preferences",
+            new_callable=AsyncMock,
+            return_value=prefs,
+        ):
             with patch.dict(os.environ, {"DEV_MODE": "false"}):
                 response = client.get("/users/me/preferences", headers=_auth_headers())
         assert response.status_code == 200
@@ -282,7 +354,9 @@ class TestGetPreferences:
 
 class TestUpdatePreferences:
     def test_update_style_returns_success_message(self, client):
-        with patch("app.main.user_service.update_user_preferences", new_callable=AsyncMock):
+        with patch(
+            "app.main.user_service.update_user_preferences", new_callable=AsyncMock
+        ):
             with patch.dict(os.environ, {"DEV_MODE": "false"}):
                 response = client.patch(
                     "/users/me/preferences",
@@ -305,8 +379,16 @@ class TestUpdatePreferences:
 
 class TestSuggestOutfit:
     def test_returns_weather_and_outfit_with_forecast(self, client):
-        with patch("app.main.weather_service.get_weather_with_forecast", new_callable=AsyncMock, return_value=MOCK_FORECAST_DATA):
-            with patch("app.main.llm_service.get_outfit_suggestion", new_callable=AsyncMock, return_value=MOCK_OUTFIT_SUGGESTION):
+        with patch(
+            "app.main.weather_service.get_weather_with_forecast",
+            new_callable=AsyncMock,
+            return_value=MOCK_FORECAST_DATA,
+        ):
+            with patch(
+                "app.main.llm_service.get_outfit_suggestion",
+                new_callable=AsyncMock,
+                return_value=MOCK_OUTFIT_SUGGESTION,
+            ):
                 response = client.post("/suggest-outfit", params={"location": "London"})
         assert response.status_code == 200
         data = response.json()
@@ -314,8 +396,16 @@ class TestSuggestOutfit:
         assert "outfit_suggestion" in data
 
     def test_returns_weather_and_outfit_without_forecast(self, client):
-        with patch("app.main.weather_service.get_weather_data", new_callable=AsyncMock, return_value=MOCK_WEATHER_DATA):
-            with patch("app.main.llm_service.get_outfit_suggestion", new_callable=AsyncMock, return_value=MOCK_OUTFIT_SUGGESTION):
+        with patch(
+            "app.main.weather_service.get_weather_data",
+            new_callable=AsyncMock,
+            return_value=MOCK_WEATHER_DATA,
+        ):
+            with patch(
+                "app.main.llm_service.get_outfit_suggestion",
+                new_callable=AsyncMock,
+                return_value=MOCK_OUTFIT_SUGGESTION,
+            ):
                 response = client.post(
                     "/suggest-outfit",
                     params={"location": "London", "include_forecast": "false"},
@@ -323,7 +413,11 @@ class TestSuggestOutfit:
         assert response.status_code == 200
 
     def test_weather_service_error_returns_500(self, client):
-        with patch("app.main.weather_service.get_weather_with_forecast", new_callable=AsyncMock, side_effect=Exception("Weather down")):
+        with patch(
+            "app.main.weather_service.get_weather_with_forecast",
+            new_callable=AsyncMock,
+            side_effect=Exception("Weather down"),
+        ):
             response = client.post("/suggest-outfit", params={"location": "London"})
         assert response.status_code == 500
 
@@ -335,7 +429,11 @@ class TestSuggestOutfit:
 
 class TestGetCurrentWeather:
     def test_returns_weather_data(self, client):
-        with patch("app.main.weather_service.get_weather_data", new_callable=AsyncMock, return_value=MOCK_WEATHER_DATA):
+        with patch(
+            "app.main.weather_service.get_weather_data",
+            new_callable=AsyncMock,
+            return_value=MOCK_WEATHER_DATA,
+        ):
             response = client.get("/weather/London")
         assert response.status_code == 200
         data = response.json()
@@ -343,15 +441,30 @@ class TestGetCurrentWeather:
         assert "current" in data
 
     def test_weather_service_error_returns_500(self, client):
-        with patch("app.main.weather_service.get_weather_data", new_callable=AsyncMock, side_effect=Exception("API down")):
+        with patch(
+            "app.main.weather_service.get_weather_data",
+            new_callable=AsyncMock,
+            side_effect=Exception("API down"),
+        ):
             response = client.get("/weather/London")
         assert response.status_code == 500
 
     def test_current_weather_shape(self, client):
-        with patch("app.main.weather_service.get_weather_data", new_callable=AsyncMock, return_value=MOCK_WEATHER_DATA):
+        with patch(
+            "app.main.weather_service.get_weather_data",
+            new_callable=AsyncMock,
+            return_value=MOCK_WEATHER_DATA,
+        ):
             response = client.get("/weather/London")
         current = response.json()["current"]
-        expected_keys = {"temperature_c", "temperature_f", "condition", "humidity", "wind_kph", "feels_like_c"}
+        expected_keys = {
+            "temperature_c",
+            "temperature_f",
+            "condition",
+            "humidity",
+            "wind_kph",
+            "feels_like_c",
+        }
         assert expected_keys.issubset(current.keys())
 
 
@@ -362,7 +475,11 @@ class TestGetCurrentWeather:
 
 class TestGetWeatherForecast:
     def test_returns_forecast_data(self, client):
-        with patch("app.main.weather_service.get_weather_with_forecast", new_callable=AsyncMock, return_value=MOCK_FORECAST_DATA):
+        with patch(
+            "app.main.weather_service.get_weather_with_forecast",
+            new_callable=AsyncMock,
+            return_value=MOCK_FORECAST_DATA,
+        ):
             response = client.get("/weather/London/forecast")
         assert response.status_code == 200
         data = response.json()
@@ -370,12 +487,20 @@ class TestGetWeatherForecast:
         assert len(data["forecast"]) >= 1
 
     def test_days_param_default_is_1(self, client):
-        with patch("app.main.weather_service.get_weather_with_forecast", new_callable=AsyncMock, return_value=MOCK_FORECAST_DATA) as mock_w:
+        with patch(
+            "app.main.weather_service.get_weather_with_forecast",
+            new_callable=AsyncMock,
+            return_value=MOCK_FORECAST_DATA,
+        ) as mock_w:
             client.get("/weather/London/forecast")
         mock_w.assert_awaited_once_with("London", 1)
 
     def test_days_param_custom_value(self, client):
-        with patch("app.main.weather_service.get_weather_with_forecast", new_callable=AsyncMock, return_value=MOCK_FORECAST_DATA) as mock_w:
+        with patch(
+            "app.main.weather_service.get_weather_with_forecast",
+            new_callable=AsyncMock,
+            return_value=MOCK_FORECAST_DATA,
+        ) as mock_w:
             client.get("/weather/London/forecast?days=3")
         mock_w.assert_awaited_once_with("London", 3)
 
@@ -388,7 +513,11 @@ class TestGetWeatherForecast:
         assert response.status_code == 422
 
     def test_forecast_service_error_returns_500(self, client):
-        with patch("app.main.weather_service.get_weather_with_forecast", new_callable=AsyncMock, side_effect=Exception("API down")):
+        with patch(
+            "app.main.weather_service.get_weather_with_forecast",
+            new_callable=AsyncMock,
+            side_effect=Exception("API down"),
+        ):
             response = client.get("/weather/London/forecast")
         assert response.status_code == 500
 
@@ -400,7 +529,9 @@ class TestGetWeatherForecast:
 
 class TestAnalyticsByTemperature:
     def test_returns_results_with_defaults(self, client):
-        with patch("app.main.analysis_service.query_weather_by_temperature", return_value=[]):
+        with patch(
+            "app.main.analysis_service.query_weather_by_temperature", return_value=[]
+        ):
             response = client.get("/analytics/temperature")
         assert response.status_code == 200
         data = response.json()
@@ -408,22 +539,31 @@ class TestAnalyticsByTemperature:
         assert "count" in data
 
     def test_uses_default_min_temp_15(self, client):
-        with patch("app.main.analysis_service.query_weather_by_temperature", return_value=[]) as mock_q:
+        with patch(
+            "app.main.analysis_service.query_weather_by_temperature", return_value=[]
+        ) as mock_q:
             client.get("/analytics/temperature")
         mock_q.assert_called_once_with(15.0, None)
 
     def test_custom_min_temp_passed_to_service(self, client):
-        with patch("app.main.analysis_service.query_weather_by_temperature", return_value=[]) as mock_q:
+        with patch(
+            "app.main.analysis_service.query_weather_by_temperature", return_value=[]
+        ) as mock_q:
             client.get("/analytics/temperature?min_temp=25.0")
         mock_q.assert_called_once_with(25.0, None)
 
     def test_date_filter_passed_to_service(self, client):
-        with patch("app.main.analysis_service.query_weather_by_temperature", return_value=[]) as mock_q:
+        with patch(
+            "app.main.analysis_service.query_weather_by_temperature", return_value=[]
+        ) as mock_q:
             client.get("/analytics/temperature?date=2025-06-15")
         mock_q.assert_called_once_with(15.0, "2025-06-15")
 
     def test_service_error_returns_500(self, client):
-        with patch("app.main.analysis_service.query_weather_by_temperature", side_effect=Exception("Athena down")):
+        with patch(
+            "app.main.analysis_service.query_weather_by_temperature",
+            side_effect=Exception("Athena down"),
+        ):
             response = client.get("/analytics/temperature")
         assert response.status_code == 500
 
@@ -435,7 +575,9 @@ class TestAnalyticsByTemperature:
 
 class TestAnalyticsLocationTrend:
     def test_returns_trend_data(self, client):
-        with patch("app.main.analysis_service.get_location_weather_trend", return_value=[]):
+        with patch(
+            "app.main.analysis_service.get_location_weather_trend", return_value=[]
+        ):
             response = client.get("/analytics/location/London")
         assert response.status_code == 200
         data = response.json()
@@ -443,7 +585,9 @@ class TestAnalyticsLocationTrend:
         assert "trend" in data
 
     def test_default_days_is_7(self, client):
-        with patch("app.main.analysis_service.get_location_weather_trend", return_value=[]) as mock_q:
+        with patch(
+            "app.main.analysis_service.get_location_weather_trend", return_value=[]
+        ) as mock_q:
             client.get("/analytics/location/London")
         mock_q.assert_called_once_with("London", 7)
 
@@ -456,7 +600,10 @@ class TestAnalyticsLocationTrend:
         assert response.status_code == 422
 
     def test_service_error_returns_500(self, client):
-        with patch("app.main.analysis_service.get_location_weather_trend", side_effect=Exception("error")):
+        with patch(
+            "app.main.analysis_service.get_location_weather_trend",
+            side_effect=Exception("error"),
+        ):
             response = client.get("/analytics/location/London")
         assert response.status_code == 500
 
@@ -469,18 +616,26 @@ class TestAnalyticsLocationTrend:
 class TestAnalyticsSummary:
     def test_returns_summary_dict(self, client):
         summary = {"unique_locations": "3", "avg_temperature": "18.5"}
-        with patch("app.main.analysis_service.get_weather_analytics_summary", return_value=summary):
+        with patch(
+            "app.main.analysis_service.get_weather_analytics_summary",
+            return_value=summary,
+        ):
             response = client.get("/analytics/summary")
         assert response.status_code == 200
         assert response.json()["summary"] == summary
 
     def test_service_error_returns_500(self, client):
-        with patch("app.main.analysis_service.get_weather_analytics_summary", side_effect=Exception("fail")):
+        with patch(
+            "app.main.analysis_service.get_weather_analytics_summary",
+            side_effect=Exception("fail"),
+        ):
             response = client.get("/analytics/summary")
         assert response.status_code == 500
 
     def test_date_param_returned_in_response(self, client):
-        with patch("app.main.analysis_service.get_weather_analytics_summary", return_value={}):
+        with patch(
+            "app.main.analysis_service.get_weather_analytics_summary", return_value={}
+        ):
             response = client.get("/analytics/summary?date=2025-03-01")
         assert response.json()["date"] == "2025-03-01"
 
@@ -492,7 +647,9 @@ class TestAnalyticsSummary:
 
 class TestAnalyticsByCondition:
     def test_returns_condition_results(self, client):
-        with patch("app.main.analysis_service.get_weather_by_condition", return_value=[]):
+        with patch(
+            "app.main.analysis_service.get_weather_by_condition", return_value=[]
+        ):
             response = client.get("/analytics/condition/Rain")
         assert response.status_code == 200
         data = response.json()
@@ -500,7 +657,10 @@ class TestAnalyticsByCondition:
         assert "results" in data
 
     def test_service_error_returns_500(self, client):
-        with patch("app.main.analysis_service.get_weather_by_condition", side_effect=Exception("err")):
+        with patch(
+            "app.main.analysis_service.get_weather_by_condition",
+            side_effect=Exception("err"),
+        ):
             response = client.get("/analytics/condition/Rain")
         assert response.status_code == 500
 
@@ -521,9 +681,333 @@ class TestDebugConfig:
         assert "has_weather_api_key" in data
 
     def test_config_key_error_handled_gracefully(self, client):
-        with patch("app.core.config.config.get_parameter", side_effect=Exception("no key")):
+        with patch(
+            "app.core.config.config.get_parameter", side_effect=Exception("no key")
+        ):
             response = client.get("/debug/config")
         assert response.status_code == 200
         data = response.json()
         assert data["has_openrouter_api_key"] is False
         assert data["has_weather_api_key"] is False
+
+
+# ---------------------------------------------------------------------------
+# GET /catalog/search
+# ---------------------------------------------------------------------------
+
+import numpy as np
+
+from app.models.item import Item
+from app.models.product import ProductRecommendation
+
+MOCK_ITEM = Item(
+    item_id="item123",
+    domain="fashion",
+    title="Blue Oxford Shirt",
+    price=35.0,
+    image_url="https://example.com/image.jpg",
+    product_url="https://poshmark.com/listing/item123",
+    source="poshmark_seed",
+    embedding=None,
+    attributes={"brand": "Zara", "size": "M", "condition": "nwt"},
+)
+
+MOCK_RECOMMENDATION = ProductRecommendation(
+    item_id="item123",
+    title="Blue Oxford Shirt",
+    price=35.0,
+    product_url="https://poshmark.com/listing/item123",
+    image_url="https://example.com/image.jpg",
+    similarity_score=0.85,
+    attributes={"brand": "Zara", "size": "M"},
+)
+
+
+class TestCatalogSearch:
+    def test_returns_200_with_valid_auth(self, client):
+        mock_vec = np.zeros(512, dtype=np.float32)
+        with (
+            patch("app.services.embedding_service.encode_text", return_value=mock_vec),
+            patch(
+                "app.services.dev_catalog_service.search",
+                new_callable=AsyncMock,
+                return_value=[MOCK_ITEM],
+            ),
+        ):
+            response = client.get(
+                "/catalog/search?q=blue+shirt",
+                headers=_auth_headers(),
+            )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["query"] == "blue shirt"
+        assert data["count"] == 1
+        assert data["results"][0]["item_id"] == "item123"
+        assert data["results"][0]["title"] == "Blue Oxford Shirt"
+
+    def test_no_auth_returns_401(self, client):
+        response = client.get("/catalog/search?q=blue+shirt")
+        assert response.status_code == 401
+
+    def test_missing_query_returns_422(self, client):
+        response = client.get("/catalog/search", headers=_auth_headers())
+        assert response.status_code == 422
+
+    def test_limit_respected(self, client):
+        mock_vec = np.zeros(512, dtype=np.float32)
+        with (
+            patch("app.services.embedding_service.encode_text", return_value=mock_vec),
+            patch(
+                "app.services.dev_catalog_service.search",
+                new_callable=AsyncMock,
+                return_value=[],
+            ) as mock_search,
+        ):
+            client.get(
+                "/catalog/search?q=jeans&limit=5",
+                headers=_auth_headers(),
+            )
+        mock_search.assert_awaited_once()
+        _, kwargs = mock_search.call_args
+        assert kwargs.get("limit") == 5 or mock_search.call_args.args[1] == 5
+
+    def test_service_error_returns_500(self, client):
+        mock_vec = np.zeros(512, dtype=np.float32)
+        with (
+            patch("app.services.embedding_service.encode_text", return_value=mock_vec),
+            patch(
+                "app.services.dev_catalog_service.search",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("db down"),
+            ),
+        ):
+            response = client.get(
+                "/catalog/search?q=shirt",
+                headers=_auth_headers(),
+            )
+        assert response.status_code == 500
+
+    def test_empty_results_returns_count_zero(self, client):
+        mock_vec = np.zeros(512, dtype=np.float32)
+        with (
+            patch("app.services.embedding_service.encode_text", return_value=mock_vec),
+            patch(
+                "app.services.dev_catalog_service.search",
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
+        ):
+            response = client.get(
+                "/catalog/search?q=nothing",
+                headers=_auth_headers(),
+            )
+        assert response.status_code == 200
+        assert response.json()["count"] == 0
+        assert response.json()["results"] == []
+
+
+# ---------------------------------------------------------------------------
+# POST /recommend-products
+# ---------------------------------------------------------------------------
+
+
+class TestRecommendProducts:
+    def _mock_service(self, recommendations: list) -> MagicMock:
+        svc = MagicMock()
+        svc.recommend = AsyncMock(return_value=recommendations)
+        return svc
+
+    def test_returns_200_with_valid_auth(self, client):
+        with (
+            patch(
+                "app.services.weather_service.get_weather_data",
+                new_callable=AsyncMock,
+                return_value=MOCK_WEATHER_DATA,
+            ),
+            patch(
+                "app.services.user_service.get_user_preferences",
+                new_callable=AsyncMock,
+                return_value={"style_preferences": {"styles": ["casual"]}},
+            ),
+            patch(
+                "app.services.recommendation_service.get_recommendation_service",
+                return_value=self._mock_service([MOCK_RECOMMENDATION]),
+            ),
+        ):
+            response = client.post(
+                "/recommend-products",
+                json={"location": "London"},
+                headers=_auth_headers(),
+            )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["location"] == "London"
+        assert data["count"] == 1
+        assert data["recommendations"][0]["item_id"] == "item123"
+
+    def test_no_auth_returns_401(self, client):
+        response = client.post("/recommend-products", json={"location": "London"})
+        assert response.status_code == 401
+
+    def test_empty_location_returns_422(self, client):
+        response = client.post(
+            "/recommend-products",
+            json={"location": ""},
+            headers=_auth_headers(),
+        )
+        assert response.status_code == 422
+
+    def test_location_too_long_returns_422(self, client):
+        response = client.post(
+            "/recommend-products",
+            json={"location": "x" * 201},
+            headers=_auth_headers(),
+        )
+        assert response.status_code == 422
+
+    def test_prefs_none_does_not_raise(self, client):
+        """get_user_preferences returning None must not cause AttributeError."""
+        with (
+            patch(
+                "app.services.weather_service.get_weather_data",
+                new_callable=AsyncMock,
+                return_value=MOCK_WEATHER_DATA,
+            ),
+            patch(
+                "app.services.user_service.get_user_preferences",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch(
+                "app.services.recommendation_service.get_recommendation_service",
+                return_value=self._mock_service([]),
+            ),
+        ):
+            response = client.post(
+                "/recommend-products",
+                json={"location": "London"},
+                headers=_auth_headers(),
+            )
+        # Should return 200 with empty recommendations, not 500
+        assert response.status_code == 200
+        assert response.json()["count"] == 0
+
+    def test_uninitialized_service_returns_500(self, client):
+        """RuntimeError from get_recommendation_service → 500."""
+        with (
+            patch(
+                "app.services.weather_service.get_weather_data",
+                new_callable=AsyncMock,
+                return_value=MOCK_WEATHER_DATA,
+            ),
+            patch(
+                "app.services.user_service.get_user_preferences",
+                new_callable=AsyncMock,
+                return_value={"style_preferences": {}},
+            ),
+            patch(
+                "app.services.recommendation_service.get_recommendation_service",
+                side_effect=RuntimeError("service not initialized"),
+            ),
+        ):
+            response = client.post(
+                "/recommend-products",
+                json={"location": "London"},
+                headers=_auth_headers(),
+            )
+        assert response.status_code == 500
+
+    def test_user_id_comes_from_jwt_not_body(self, client):
+        """user_id in response must match the JWT subject, not any request body field."""
+        captured = {}
+
+        async def _fake_recommend(**kwargs):
+            captured["user_id"] = kwargs.get("user_id")
+            return []
+
+        svc = MagicMock()
+        svc.recommend = _fake_recommend
+
+        with (
+            patch(
+                "app.services.weather_service.get_weather_data",
+                new_callable=AsyncMock,
+                return_value=MOCK_WEATHER_DATA,
+            ),
+            patch(
+                "app.services.user_service.get_user_preferences",
+                new_callable=AsyncMock,
+                return_value={},
+            ),
+            patch(
+                "app.services.recommendation_service.get_recommendation_service",
+                return_value=svc,
+            ),
+        ):
+            response = client.post(
+                "/recommend-products",
+                json={"location": "London"},
+                headers=_auth_headers(MOCK_USER_ID),
+            )
+
+        assert response.status_code == 200
+        assert captured["user_id"] == MOCK_USER_ID
+        assert response.json()["user_id"] == MOCK_USER_ID
+
+    def test_include_explanation_forwarded_to_service(self, client):
+        captured = {}
+
+        async def _fake_recommend(**kwargs):
+            captured["include_explanation"] = kwargs.get("include_explanation")
+            return []
+
+        svc = MagicMock()
+        svc.recommend = _fake_recommend
+
+        with (
+            patch(
+                "app.services.weather_service.get_weather_data",
+                new_callable=AsyncMock,
+                return_value=MOCK_WEATHER_DATA,
+            ),
+            patch(
+                "app.services.user_service.get_user_preferences",
+                new_callable=AsyncMock,
+                return_value={},
+            ),
+            patch(
+                "app.services.recommendation_service.get_recommendation_service",
+                return_value=svc,
+            ),
+        ):
+            client.post(
+                "/recommend-products",
+                json={"location": "London", "include_explanation": True},
+                headers=_auth_headers(),
+            )
+
+        assert captured["include_explanation"] is True
+
+    def test_weather_service_error_returns_500(self, client):
+        with (
+            patch(
+                "app.services.weather_service.get_weather_data",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("weather API down"),
+            ),
+            patch(
+                "app.services.user_service.get_user_preferences",
+                new_callable=AsyncMock,
+                return_value={},
+            ),
+            patch(
+                "app.services.recommendation_service.get_recommendation_service",
+                return_value=self._mock_service([]),
+            ),
+        ):
+            response = client.post(
+                "/recommend-products",
+                json={"location": "London"},
+                headers=_auth_headers(),
+            )
+        assert response.status_code == 500

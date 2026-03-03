@@ -1,4 +1,4 @@
-name: Deploy to AWS Lambda
+name: Deploy
 
 on:
   push:
@@ -9,66 +9,80 @@ permissions:
   contents: read
 
 jobs:
-  deploy:
+  test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.13'
-          
-      - name: Install SAM CLI
-        uses: aws-actions/setup-sam@v2
-        
+
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v2
         with:
-          # Replace with your actual Role ARN
           role-to-assume: arn:aws:iam::903558039846:role/github_actions
           aws-region: us-west-1
-          
-      - name: Build and Deploy
+
+      - name: Run tests on EC2 via SSM
         run: |
-          # Determine stack name based on branch
-          if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
-            STACK_NAME="fitted-wardrobe-prod"
-          else
-            STACK_NAME="fitted-wardrobe-dev"
+          BRANCH="${{ github.ref_name }}"
+          if [[ ! "$BRANCH" =~ ^[a-zA-Z0-9/_.-]+$ ]]; then
+            echo "Invalid branch name: $BRANCH"
+            exit 1
           fi
-          
-          echo "Deploying to stack: $STACK_NAME"
-          
-          # Check if stack exists and is in ROLLBACK_COMPLETE state
-          STACK_STATUS=$(aws cloudformation describe-stacks \
-            --stack-name $STACK_NAME \
+
+          COMMAND_ID=$(aws ssm send-command \
             --region us-west-1 \
-            --query 'Stacks[0].StackStatus' \
-            --output text 2>/dev/null || echo "DOES_NOT_EXIST")
-          
-          if [[ "$STACK_STATUS" == "ROLLBACK_COMPLETE" ]]; then
-            echo "Stack is in ROLLBACK_COMPLETE state. Deleting before redeployment..."
-            aws cloudformation delete-stack \
-              --stack-name $STACK_NAME \
-              --region us-west-1
-            
-            echo "Waiting for stack deletion to complete..."
-            aws cloudformation wait stack-delete-complete \
-              --stack-name $STACK_NAME \
-              --region us-west-1
-            
-            echo "Stack deleted successfully."
+            --instance-ids "${{ secrets.EC2_INSTANCE_ID }}" \
+            --document-name "AWS-RunShellScript" \
+            --parameters "commands=[\"runuser -l ec2-user -c 'cd /home/ec2-user/fitted && git fetch origin && git checkout $BRANCH && git pull origin $BRANCH && source .venv/bin/activate && bash ./run_tests.sh'\"]" \
+            --query 'Command.CommandId' \
+            --output text)
+
+          echo "SSM Command ID: $COMMAND_ID"
+
+          # Wait for completion; ignore waiter exit code so we always print output
+          aws ssm wait command-executed \
+            --region us-west-1 \
+            --command-id "$COMMAND_ID" \
+            --instance-id "${{ secrets.EC2_INSTANCE_ID }}" || true
+
+          STATUS=$(aws ssm get-command-invocation \
+            --region us-west-1 \
+            --command-id "$COMMAND_ID" \
+            --instance-id "${{ secrets.EC2_INSTANCE_ID }}" \
+            --query 'Status' \
+            --output text)
+
+          echo "--- STDOUT ---"
+          aws ssm get-command-invocation \
+            --region us-west-1 \
+            --command-id "$COMMAND_ID" \
+            --instance-id "${{ secrets.EC2_INSTANCE_ID }}" \
+            --query 'StandardOutputContent' \
+            --output text
+
+          echo "--- STDERR ---"
+          aws ssm get-command-invocation \
+            --region us-west-1 \
+            --command-id "$COMMAND_ID" \
+            --instance-id "${{ secrets.EC2_INSTANCE_ID }}" \
+            --query 'StandardErrorContent' \
+            --output text
+
+          if [ "$STATUS" != "Success" ]; then
+            echo "Tests failed with status: $STATUS"
+            exit 1
           fi
-          
-          sam build
-          sam deploy \
-            --stack-name $STACK_NAME \
-            --region us-west-1 \
-            --capabilities CAPABILITY_IAM \
-            --no-confirm-changeset \
-            --no-fail-on-empty-changeset \
-            --resolve-s3
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          role-to-assume: arn:aws:iam::903558039846:role/github_actions
+          aws-region: us-west-1
 
       - name: Deploy to EC2 via SSM
         # Requires the github_actions IAM role to have:

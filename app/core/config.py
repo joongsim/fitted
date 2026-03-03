@@ -3,6 +3,7 @@
 import logging
 import os
 from functools import lru_cache
+from typing import Optional
 
 import boto3
 
@@ -22,7 +23,7 @@ class Config:
 
     def __init__(self) -> None:
         self._ssm_client = None
-        self._use_ssm = os.environ.get("USE_SSM", "true").lower() != "false"
+        self._use_ssm = os.environ.get("USE_SSM", "false").lower() != "false"
 
     @property
     def ssm_client(self):
@@ -96,13 +97,11 @@ class Config:
         return self.get_parameter("/fitted/database-url")
 
     @property
-    def weather_bucket_name(self) -> str:
-        """Get Weather Data S3 bucket name from environment (injected by SAM template)."""
+    def weather_bucket_name(self) -> Optional[str]:
+        """Get Weather Data S3 bucket name from environment (set in systemd service)."""
         value = os.environ.get("WEATHER_BUCKET_NAME")
         logger.debug("WEATHER_BUCKET_NAME: %s", value)
-        if not value:
-            raise ValueError("WEATHER_BUCKET_NAME environment variable is not set")
-        return value
+        return value or None
 
     @property
     def rapidapi_key(self) -> str:

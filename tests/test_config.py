@@ -23,8 +23,8 @@ def _make_fresh_config():
 
 
 class TestSsmModeDetection:
-    def test_ssm_enabled_when_aws_execution_env_set(self):
-        with patch.dict(os.environ, {"AWS_EXECUTION_ENV": "AWS_Lambda_python3.11"}, clear=False):
+    def test_ssm_enabled_when_use_ssm_explicitly_true(self):
+        with patch.dict(os.environ, {"USE_SSM": "true"}, clear=False):
             cfg = _make_fresh_config()
             assert cfg._use_ssm is True
 
@@ -252,7 +252,7 @@ class TestSsmClientLazyLoad:
         cfg = _make_fresh_config()
         with patch("boto3.client", return_value=MagicMock()) as mock_boto:
             _ = cfg.ssm_client
-            mock_boto.assert_called_once_with("ssm")
+            mock_boto.assert_called_once_with("ssm", region_name="us-west-1")
 
     def test_ssm_client_reused_on_subsequent_accesses(self):
         cfg = _make_fresh_config()
