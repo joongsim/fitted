@@ -86,7 +86,13 @@ async def search(
             attrs,
             _,
         ) = row
-        embedding = np.array(emb_raw, dtype=np.float32) if emb_raw is not None else None
+        if emb_raw is None:
+            embedding = None
+        elif isinstance(emb_raw, str):
+            import json
+            embedding = np.array(json.loads(emb_raw), dtype=np.float32)
+        else:
+            embedding = np.array(emb_raw, dtype=np.float32)
         items.append(
             Item(
                 item_id=str(item_id),
