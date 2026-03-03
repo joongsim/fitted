@@ -13,6 +13,7 @@ docs/private/
 .claude/
 CLAUDE.md
 archive/
+plans/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

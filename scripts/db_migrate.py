@@ -1,13 +1,9 @@
 import os
 import sys
 import psycopg
-from psycopg import sql
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from app.core.config import config
-
-# Database connection URL from SSM (or env for local dev)
-DATABASE_URL = config.database_url
 
 SCHEMA_SQL = """
 -- Enable extensions
@@ -52,7 +48,7 @@ CREATE TABLE IF NOT EXISTS wardrobe_items (
     image_s3_key VARCHAR(500),     -- e.g. "wardrobe-images/{uuid}.jpg"
     tags TEXT[] DEFAULT '{}',
     classification JSONB,          -- NULL until vision service
-    embedding VECTOR(384),         -- NULL until embeddings phase
+    embedding VECTOR(512),         -- NULL until embeddings phase; CLIP ViT-B/32 (512-dim)
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -93,26 +89,39 @@ CREATE TRIGGER set_updated_at_prefs
     BEFORE UPDATE ON user_preferences
     FOR EACH ROW EXECUTE FUNCTION update_modified_column();
 
+-- Align wardrobe_items.embedding to VECTOR(512) (CLIP ViT-B/32).
+-- Only executes when the column dimension differs from 512 (safe on re-runs).
+-- The HNSW index must be dropped first; pgvector won't ALTER TYPE with an index attached.
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM pg_attribute a
+        JOIN pg_class c ON c.oid = a.attrelid
+        WHERE c.relname = 'wardrobe_items'
+          AND a.attname = 'embedding'
+          AND a.atttypmod <> 512
+    ) THEN
+        DROP INDEX IF EXISTS idx_wardrobe_embedding;
+        ALTER TABLE wardrobe_items ALTER COLUMN embedding TYPE VECTOR(512);
+    END IF;
+END $$;
+
 -- Product catalog — Poshmark dev seed + future SerpAPI/production sources
--- NOTE: VECTOR(512) for CLIP ViT-B/32 (512-dim).
--- wardrobe_items currently uses VECTOR(384) — to be aligned in a future migration
--- when the CLIP embedding service is deployed and wardrobe embeddings are backfilled
--- (all embeddings are NULL today, so the ALTER COLUMN will be safe at that point).
 CREATE TABLE IF NOT EXISTS catalog_items (
-    item_id       VARCHAR PRIMARY KEY,           -- Poshmark listing ID
+    item_id       TEXT PRIMARY KEY,              -- Poshmark listing ID
     domain        VARCHAR NOT NULL DEFAULT 'fashion',
     title         TEXT,
-    price         FLOAT,
+    price         NUMERIC(10, 2),               -- monetary value; avoid float imprecision
     image_url     TEXT,                          -- S3 URL after image copy
     product_url   TEXT,
-    source        VARCHAR,                       -- 'poshmark_seed' | 'serpapi' | ...
+    source        TEXT,                          -- 'poshmark_seed' | 'serpapi' | ...
     embedding     VECTOR(512),                   -- NULL until CLIP service is built
-    content_hash  VARCHAR,                       -- SHA-256 of title:price:brand:category
+    content_hash  CHAR(64),                      -- SHA-256 of title:price:brand:category
     attributes    JSONB DEFAULT '{}',            -- brand, size, condition, colors, etc.
     first_seen    TIMESTAMPTZ DEFAULT NOW(),
     last_seen     TIMESTAMPTZ DEFAULT NOW(),
     hit_count     INT DEFAULT 1,
-    model_version VARCHAR
+    model_version TEXT
 );
 
 -- HNSW index for vector similarity search (works on empty tables + NULL embeddings)
@@ -133,24 +142,108 @@ CREATE INDEX IF NOT EXISTS idx_catalog_attributes
 -- Content hash index for deduplication queries
 CREATE INDEX IF NOT EXISTS idx_catalog_content_hash
     ON catalog_items(content_hash);
+
+-- Query cache table for storing recent queries, their embeddings, and results
+CREATE TABLE IF NOT EXISTS query_cache (
+    cache_id        UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    query_hash      CHAR(64) UNIQUE NOT NULL,
+    query_text      TEXT,
+    query_embedding VECTOR(512),
+    s3_key          TEXT,
+    expires_at      TIMESTAMPTZ
+);
+
+-- HNSW index for query embedding similarity search (works on empty tables + NULL embeddings)
+CREATE INDEX IF NOT EXISTS idx_query_cache_embedding
+    ON query_cache USING hnsw (query_embedding vector_cosine_ops);
+
+-- Index on expires_at for efficient cleanup of expired cache entries
+CREATE INDEX IF NOT EXISTS idx_query_cache_expires
+    ON query_cache (expires_at);
+
+-- User interaction signals — raw click/save/dismiss events from recommendation results.
+-- These feed the Week 8 training pipeline (triplet construction for TripletMarginLoss).
+CREATE TABLE IF NOT EXISTS user_interactions (
+    interaction_id   UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id          UUID REFERENCES users(user_id) ON DELETE CASCADE,
+    item_id          TEXT REFERENCES catalog_items(item_id),
+    interaction_type VARCHAR NOT NULL CHECK (interaction_type IN ('click', 'save', 'dismiss')),
+    weather_context  JSONB DEFAULT '{}',  -- {temp_c, condition, location} at time of interaction
+    query_text       TEXT,                -- the LLM-generated search query that surfaced this item
+    created_at       TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Composite index: user timeline queries used by the training pipeline
+CREATE INDEX IF NOT EXISTS idx_interactions_user
+    ON user_interactions (user_id, created_at DESC);
+
+-- Pairwise preference signals — "I prefer item A over item B".
+-- These feed the Bradley-Terry preference reranker (preference_reranker.py).
+CREATE TABLE IF NOT EXISTS preference_pairs (
+    pair_id    UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id    UUID REFERENCES users(user_id) ON DELETE CASCADE,
+    item_a_id  TEXT REFERENCES catalog_items(item_id),
+    item_b_id  TEXT REFERENCES catalog_items(item_id),
+    preferred  VARCHAR NOT NULL CHECK (preferred IN ('a', 'b')),
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Index for per-user Bradley-Terry model fitting
+CREATE INDEX IF NOT EXISTS idx_pairs_user
+    ON preference_pairs (user_id);
 """
 
 
-def migrate():
-    if not DATABASE_URL:
-        print("Error: DATABASE_URL environment variable not set.")
-        return
+def _split_statements(sql: str) -> list[str]:
+    """Split a SQL script into individual statements, respecting dollar-quoted blocks.
+
+    A naive split on ';' breaks PL/pgSQL functions whose bodies contain semicolons
+    inside $$ ... $$ dollar-quote delimiters.  This function tracks that quoting state
+    so each returned string is exactly one complete, executable SQL statement.
+    """
+    statements: list[str] = []
+    buf: list[str] = []
+    in_dollar_quote = False
+
+    for line in sql.splitlines():
+        if "$$" in line:
+            # An odd number of $$ occurrences on a single line toggles the quoting state.
+            if line.count("$$") % 2 == 1:
+                in_dollar_quote = not in_dollar_quote
+        buf.append(line)
+        if not in_dollar_quote and line.rstrip().endswith(";"):
+            stmt = "\n".join(buf).strip()
+            if stmt:
+                statements.append(stmt)
+            buf = []
+
+    remainder = "\n".join(buf).strip()
+    if remainder:
+        statements.append(remainder)
+
+    return statements
+
+
+def migrate() -> None:
+    """Apply the database schema migrations."""
+    try:
+        database_url = config.database_url
+    except Exception as e:
+        print(f"Error: could not load DATABASE_URL — {e}", file=sys.stderr)
+        sys.exit(1)
 
     print("Connecting to database...")
     try:
-        with psycopg.connect(DATABASE_URL) as conn:
+        with psycopg.connect(database_url, autocommit=True) as conn:
             with conn.cursor() as cur:
+                conn.autocommit = True
                 print("Applying schema...")
-                cur.execute(SCHEMA_SQL)
-                conn.commit()
+                for statement in _split_statements(SCHEMA_SQL):
+                    cur.execute(statement)
                 print("Migration successful.")
     except Exception as e:
-        print(f"Migration failed: {e}")
+        print(f"Migration failed: {e}", file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

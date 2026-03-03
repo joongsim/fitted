@@ -343,8 +343,8 @@ class TestSearchListings:
 
         call_kwargs = mock_client.get.call_args
         headers = call_kwargs.kwargs.get("headers", call_kwargs[1].get("headers", {}))
-        assert headers["X-RapidAPI-Key"] == "my-api-key-123"
-        assert headers["X-RapidAPI-Host"] == "poshmark.p.rapidapi.com"
+        assert headers["x-rapidapi-key"] == "my-api-key-123"
+        assert headers["x-rapidapi-host"] == "poshmark.p.rapidapi.com"
 
     @pytest.mark.asyncio
     async def test_page_param_forwarded(self):
