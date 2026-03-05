@@ -609,12 +609,40 @@ async def recommend_products(
             include_explanation=request.include_explanation,
         )
 
+        from app.services.affiliate_service import (
+            detect_network,
+            get_affiliate_config,
+            record_affiliate_click,
+            rewrite_to_affiliate_url,
+        )
+
+        affiliate_cfg = get_affiliate_config()
+        recs_out = []
+        for rec in recommendations:
+            rec_dict = rec.model_dump()
+            original_url = rec_dict.get("product_url") or ""
+            affiliate_url = rewrite_to_affiliate_url(original_url, **affiliate_cfg)
+            network = (
+                detect_network(affiliate_url)
+                if affiliate_url != original_url
+                else "none"
+            )
+            click_id = await record_affiliate_click(
+                user_id=user_id,
+                item_id=rec_dict["item_id"],
+                original_url=original_url,
+                affiliate_url=affiliate_url,
+                network=network,
+            )
+            rec_dict["click_url"] = f"/r/{click_id}"
+            recs_out.append(rec_dict)
+
         return {
             "user_id": user_id,
             "location": request.location,
             "weather": weather_context,
-            "count": len(recommendations),
-            "recommendations": [r.model_dump() for r in recommendations],
+            "count": len(recs_out),
+            "recommendations": recs_out,
         }
 
     except Exception:
@@ -880,3 +908,42 @@ async def record_preference_pair(
         body.preferred,
     )
     return {"status": "recorded"}
+
+
+# --- Affiliate Redirect ---
+
+
+@app.get("/r/{click_id}")
+async def affiliate_redirect(click_id: str) -> None:
+    """
+    Server-side affiliate redirect.
+
+    Marks the affiliate_clicks row as clicked (sets clicked_at = NOW()) and
+    issues an HTTP 302 to the affiliate URL.  If the click_id is not found or
+    was already clicked, falls back to the stored affiliate URL without
+    re-marking.
+
+    No authentication required — the click_id is a single-use opaque token
+    generated for each recommendation result.  The user's identity is already
+    embedded in the affiliate_clicks row.
+    """
+    from fastapi.responses import RedirectResponse
+
+    from app.services.affiliate_service import resolve_and_record_click
+
+    affiliate_url = await resolve_and_record_click(click_id)
+    if affiliate_url is None:
+        # Already clicked or not found — look up the URL without marking again
+        async with db_service.get_connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "SELECT affiliate_url FROM affiliate_clicks WHERE click_id = %s",
+                    (click_id,),
+                )
+                row = await cur.fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail="Click not found")
+        affiliate_url = row[0]
+
+    logger.info("GET /r/%s → %s", click_id, affiliate_url[:80])
+    return RedirectResponse(url=affiliate_url, status_code=302)

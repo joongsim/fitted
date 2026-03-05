@@ -833,6 +833,11 @@ class TestRecommendProducts:
                 "app.services.recommendation_service.get_recommendation_service",
                 return_value=self._mock_service([MOCK_RECOMMENDATION]),
             ),
+            patch(
+                "app.services.affiliate_service.record_affiliate_click",
+                new_callable=AsyncMock,
+                return_value="test-click-id",
+            ),
         ):
             response = client.post(
                 "/recommend-products",
@@ -844,6 +849,7 @@ class TestRecommendProducts:
         assert data["location"] == "London"
         assert data["count"] == 1
         assert data["recommendations"][0]["item_id"] == "item123"
+        assert data["recommendations"][0]["click_url"] == "/r/test-click-id"
 
     def test_no_auth_returns_401(self, client):
         response = client.post("/recommend-products", json={"location": "London"})
@@ -881,6 +887,11 @@ class TestRecommendProducts:
             patch(
                 "app.services.recommendation_service.get_recommendation_service",
                 return_value=self._mock_service([]),
+            ),
+            patch(
+                "app.services.affiliate_service.record_affiliate_click",
+                new_callable=AsyncMock,
+                return_value="test-click-id",
             ),
         ):
             response = client.post(
