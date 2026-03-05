@@ -457,6 +457,41 @@ custom_css = Style(
     }
     .product-card-action-btn:hover { background-color: #f1f5f9; }
 
+    /* Product Grid & Shop Section */
+    .product-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+        gap: 0.75rem;
+        margin-top: 1rem;
+    }
+    .shop-section {
+        margin-top: 2rem;
+        padding-top: 1rem;
+        border-top: 2px solid #000;
+    }
+    .shop-section h3 {
+        font-size: 1rem;
+        font-weight: bold;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        margin-bottom: 0.75rem;
+    }
+    .shop-btn {
+        background-color: #95FB62;
+        border: 2px solid #000;
+        color: #000;
+        padding: 0.5rem 1.2rem;
+        cursor: pointer;
+        font-size: 0.875rem;
+        font-weight: bold;
+    }
+    .shop-btn:hover { background-color: #7de84a; }
+    .rec-meta {
+        font-size: 0.8rem;
+        color: #64748b;
+        margin-bottom: 0.75rem;
+    }
+
     /* Preferences Styles */
     .prefs-form {
         display: flex;
@@ -552,6 +587,7 @@ def nav_bar(session):
             [
                 A("Wardrobe", href="/wardrobe"),
                 A("Prefs", href="/preferences"),
+                A("Recs", href="/recommendations"),
                 A("Logout", href="/logout"),
             ]
         )
@@ -579,7 +615,13 @@ def outfit_item(label: str, value: str) -> Div:
     )
 
 
-def weather_results(location: str, weather: dict, forecast: dict, outfit: dict) -> Div:
+def weather_results(
+    location: str,
+    weather: dict,
+    forecast: dict,
+    outfit: dict,
+    show_shop_btn: bool = False,
+) -> Div:
     """Render weather and outfit results."""
     temp_f = weather.get("temp_f", "")
     min_temp_f = forecast.get("min_temp_f", "")
@@ -608,6 +650,27 @@ def weather_results(location: str, weather: dict, forecast: dict, outfit: dict) 
     if outfit_accessories and outfit_accessories != "None":
         outfit_items.append(outfit_item("Accessories", outfit_accessories))
 
+    shop_section = Div(id="rec-results")
+    if show_shop_btn:
+        shop_section = Div(
+            H3("Shop These Looks"),
+            Form(
+                Input(type="hidden", name="location", value=location),
+                Button(
+                    Span("Get Recommendations", cls="loading-text"),
+                    Span(cls="loading loading-spinner"),
+                    type="submit",
+                    cls="shop-btn",
+                ),
+                hx_post="/get-recommendations",
+                hx_target="#rec-results",
+                hx_swap="outerHTML",
+                hx_indicator="closest form",
+            ),
+            Div(id="rec-results"),
+            cls="shop-section",
+        )
+
     return Div(
         Div(
             Div(
@@ -634,6 +697,7 @@ def weather_results(location: str, weather: dict, forecast: dict, outfit: dict) 
             cls="weather-card retro-card",
         ),
         Div(*outfit_items, cls="outfit-section"),
+        shop_section,
         id="results",
     )
 
@@ -850,7 +914,13 @@ async def get_outfit(location: str, session):
                 location_info.get("country"),
             ]
             display_location = ", ".join(p for p in parts if p) or location.title()
-            return weather_results(display_location, weather, forecast, outfit)
+            return weather_results(
+                display_location,
+                weather,
+                forecast,
+                outfit,
+                show_shop_btn="access_token" in session,
+            )
     except Exception:
         logger.error(
             "Connection error fetching outfit for location=%s.", location, exc_info=True
@@ -1086,6 +1156,121 @@ async def log_interaction(item_id: str, interaction_type: str, session):
             interaction_type,
         )
     return ""
+
+
+# --- Recommendations Routes ---
+
+
+@app.get("/recommendations")
+async def recommendations_page(session):
+    """Full recommendations page — location form that fires /get-recommendations."""
+    if "access_token" not in session:
+        return RedirectResponse("/login")
+
+    return Title("Recommendations - Fitted"), Body(
+        nav_bar(session),
+        Div(
+            H2("Shop Recommendations"),
+            P(
+                "Enter a location to get personalized product picks based on the weather.",
+                style="color:#64748b;font-size:0.875rem;margin-bottom:1.5rem;",
+            ),
+            Form(
+                Div(
+                    Input(
+                        type="text",
+                        name="location",
+                        placeholder="Enter city (e.g., San Francisco)",
+                        required=True,
+                    ),
+                    cls="search-form-input-row",
+                ),
+                Div(
+                    Button(
+                        Span("Get Recommendations", cls="loading-text"),
+                        Span(cls="loading loading-spinner"),
+                        type="submit",
+                    ),
+                    cls="search-form-btn-row",
+                ),
+                hx_post="/get-recommendations",
+                hx_target="#rec-results",
+                hx_swap="outerHTML",
+                hx_indicator="closest form",
+                cls="search-form",
+            ),
+            Div(id="rec-results"),
+            cls="container",
+        ),
+        data_theme="light",
+    )
+
+
+@app.post("/get-recommendations")
+async def get_recommendations(location: str, session):
+    """HTMX fragment: call POST /recommend-products, return a product card grid."""
+    if "access_token" not in session:
+        return P("Please log in to get recommendations.", cls="error-message")
+
+    if not location or not location.strip():
+        return P("Please enter a location.", cls="error-message")
+
+    location = location.strip()
+    token = session["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+    logger.info("Recommendations request from frontend for location=%s", location)
+
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                f"{API_BASE_URL}/recommend-products",
+                json={"location": location, "include_explanation": False},
+                headers=headers,
+                timeout=45.0,
+            )
+            if resp.status_code != 200:
+                err = resp.json().get("detail", "Unknown error")
+                logger.error(
+                    "Backend returned error for recommendations: location=%s status=%d detail=%s",
+                    location,
+                    resp.status_code,
+                    err,
+                )
+                return P(f"Error: {err}", cls="error-message", id="rec-results")
+
+            data = resp.json()
+            recommendations = data.get("recommendations", [])
+            weather = data.get("weather", {})
+            temp_c = weather.get("temp_c", 0.0)
+            condition = weather.get("condition", "")
+
+    except Exception:
+        logger.error(
+            "Connection error fetching recommendations for location=%s.",
+            location,
+            exc_info=True,
+        )
+        return P(
+            "Connection error: could not reach the server.",
+            cls="error-message",
+            id="rec-results",
+        )
+
+    if not recommendations:
+        return P(
+            "No recommendations found for this location.",
+            cls="rec-meta",
+            id="rec-results",
+        )
+
+    return Div(
+        P(
+            f"Top picks for {location} ({condition}, {temp_c:.0f}\u00b0C)",
+            cls="rec-meta",
+        ),
+        Div(*[product_card(item) for item in recommendations], cls="product-grid"),
+        id="rec-results",
+    )
 
 
 # --- Preferences Routes ---

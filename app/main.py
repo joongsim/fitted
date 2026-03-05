@@ -711,6 +711,31 @@ async def add_wardrobe_item(
         image_s3_key=image_s3_key,
     )
 
+    if image_s3_key:
+        import asyncio
+
+        async def _embed_wardrobe_image(item_id: str, s3_key: str) -> None:
+            try:
+                from app.services.embedding_service import encode_image
+
+                vec = encode_image(s3_key)
+                async with db_service.get_connection() as conn:
+                    async with conn.cursor() as cur:
+                        await cur.execute(
+                            "UPDATE wardrobe_items SET embedding = %s::vector WHERE item_id = %s",
+                            (vec.tolist(), item_id),
+                        )
+                        await conn.commit()
+                logger.info("Wardrobe image embedded: item_id=%s", item_id)
+            except Exception:
+                logger.error(
+                    "Failed to embed wardrobe image: item_id=%s",
+                    item_id,
+                    exc_info=True,
+                )
+
+        asyncio.create_task(_embed_wardrobe_image(item["item_id"], image_s3_key))
+
     image_url = get_image_presigned_url(image_s3_key) if image_s3_key else None
     return WardrobeItemResponse(
         item_id=item["item_id"],
