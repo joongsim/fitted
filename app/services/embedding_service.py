@@ -1,5 +1,6 @@
-"""CLIP ViT-B/32 text encoder with lazy import and module-level singleton cache."""
+"""CLIP ViT-B/32 text and image encoder with lazy import and module-level singleton cache."""
 
+import io
 import logging
 
 import numpy as np
@@ -9,27 +10,28 @@ logger = logging.getLogger(__name__)
 # Module-level singletons — None until first call
 _model = None
 _tokenizer = None
+_transform = None
 _CLIP_MODEL = "ViT-B-32"
 _CLIP_PRETRAINED = "laion400m_e32"
 
 
-def _load_model():
-    """Load CLIP once; cache for the lifetime of the warm Lambda instance."""
-    global _model, _tokenizer
+def _load_model_and_transform():
+    """Load CLIP once; cache model, tokenizer, and image transform for the lifetime of the process."""
+    global _model, _tokenizer, _transform
     if _model is not None:
-        return _model, _tokenizer
+        return _model, _tokenizer, _transform
 
     import open_clip  # lazy import — torch is not loaded until this line
     import torch  # noqa: F401 — imported here to keep cold-start cost deferred
 
     logger.info("Loading CLIP model %s (first call)", _CLIP_MODEL)
-    model, _, _ = open_clip.create_model_and_transforms(
+    model, _, preprocess_val = open_clip.create_model_and_transforms(
         _CLIP_MODEL, pretrained=_CLIP_PRETRAINED
     )
     model.eval()
     tokenizer = open_clip.get_tokenizer(_CLIP_MODEL)
-    _model, _tokenizer = model, tokenizer
-    return _model, _tokenizer
+    _model, _tokenizer, _transform = model, tokenizer, preprocess_val
+    return _model, _tokenizer, _transform
 
 
 def encode_text(text: str) -> np.ndarray:
@@ -48,7 +50,7 @@ def encode_text(text: str) -> np.ndarray:
     """
     import torch
 
-    model, tokenizer = _load_model()
+    model, tokenizer, _ = _load_model_and_transform()
 
     tokens = tokenizer([text])
     with torch.no_grad():
@@ -65,8 +67,66 @@ def encode_text(text: str) -> np.ndarray:
     return embedding
 
 
+def encode_image(url_or_s3_key: str) -> np.ndarray:
+    """
+    Encode an image using the CLIP ViT-B/32 image encoder.
+
+    Accepts a public URL (https://...) or an S3 key (wardrobe-images/...).
+    Returns a 512-dim float32 numpy array, L2-normalized unit vector — same
+    embedding space as encode_text.
+
+    IMPORTANT: Only runs on EC2. Do not import this function in Lambda code.
+    Image encoder weights are ~290MB; Lambda's unzipped limit is 250MB.
+
+    Args:
+        url_or_s3_key: Public URL or S3 key.
+
+    Returns:
+        np.ndarray of shape (512,), dtype float32, unit norm.
+    """
+    import torch
+    from PIL import Image
+
+    model, _, transform = _load_model_and_transform()
+
+    if url_or_s3_key.startswith("http"):
+        import requests
+
+        logger.debug("encode_image: fetching URL %s", url_or_s3_key[:120])
+        response = requests.get(url_or_s3_key, timeout=10)
+        response.raise_for_status()
+        image_bytes = response.content
+    else:
+        import boto3
+
+        logger.debug("encode_image: fetching S3 key %s", url_or_s3_key)
+        s3 = boto3.client("s3")
+        import os
+
+        bucket = os.environ.get("S3_BUCKET", "fitted-wardrobe-images")
+        obj = s3.get_object(Bucket=bucket, Key=url_or_s3_key)
+        image_bytes = obj["Body"].read()
+
+    image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+    tensor = transform(image).unsqueeze(0)  # (1, 3, 224, 224)
+
+    with torch.no_grad():
+        features = model.encode_image(tensor)
+        features = features / features.norm(dim=-1, keepdim=True)  # L2 normalize
+
+    embedding: np.ndarray = features.cpu().numpy().astype(np.float32)[0]
+    logger.debug(
+        "encode_image: key=%r shape=%s norm=%.4f",
+        url_or_s3_key[:80],
+        embedding.shape,
+        float(np.linalg.norm(embedding)),
+    )
+    return embedding
+
+
 def reset_model_for_testing() -> None:
     """Reset cached singletons — call in test teardown to avoid state leakage."""
-    global _model, _tokenizer
+    global _model, _tokenizer, _transform
     _model = None
     _tokenizer = None
+    _transform = None

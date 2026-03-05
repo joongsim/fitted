@@ -1,6 +1,6 @@
 # Fitted — Engineering Plan
 
-**Status:** Week 6 core complete — preference reranker + interaction endpoints pending
+**Status:** Week 7 complete — image embedding + frontend recommendation flow pending
 **Stack:** FastHTML on EC2 · FastAPI on Lambda · PostgreSQL + pgvector on RDS · S3 · CLIP ViT-B/32
 
 ---
@@ -28,10 +28,8 @@ User → FastHTML (EC2)
           → LLM (OpenRouter): generate search query from preferences + weather
           → VectorCache.lookup(query_embedding): pgvector semantic search on query_cache
                ├── HIT  → return cached candidates
-               └── MISS → SerpAPI → persist thumbnails to S3
-                                  → CLIP embed via EC2 embedding service
-                                  → upsert catalog_items
-                                  → cache query embedding
+               └── MISS → ANN search on catalog_items (Poshmark dev catalog)
+                        → cache query embedding
           → TwoTowers.rank(user_embedding, candidates)
           → PreferenceReranker.rerank(candidates, preference_pairs)
           → LLM: generate natural language explanation
@@ -66,9 +64,6 @@ graph TD
     API --> EMBS
     API --> PG
     API --> LLM[OpenRouter]
-    API --> SERP[SerpAPI]
-    SERP --> IMAGES
-    SERP --> BRONZE
     BRONZE --> DBT[dbt] --> PG
     MODELS --> API
 ```
@@ -191,7 +186,7 @@ class Item:
 query embedding (CLIP text)
     → vector_cache.lookup(threshold=0.85)         # semantic cache on query_cache table
         ├── HIT  → cached candidates
-        └── MISS → SerpAPI → S3 thumbnail persist → CLIP encode → catalog_items upsert → cache
+        └── MISS → ANN search on catalog_items (Poshmark catalog) → cache
 
 candidates
     → UserTower(wardrobe_embeddings, preferences) → 512-dim user vector
@@ -221,15 +216,15 @@ WeatherAPI integration, S3 bronze/silver/gold, Athena analytics endpoints.
 ### ✅ Week 3 — API Hardening + Frontend
 Pydantic validation, forecast support, FastHTML frontend, S3-backed caching.
 
-### 🔄 Week 4 — EC2 + RDS + Auth + Wardrobe
+### ✅ Week 4 — EC2 + RDS + Auth + Wardrobe
 - [x] SSH key, SSM secrets
 - [x] CloudFormation: VPC (IPv6), EC2 t4g.micro (Elastic IP), RDS db.t4g.micro (PostgreSQL 16 + pgvector), security groups, IAM
 - [x] DB schema: `users`, `wardrobe_items` (VECTOR(512)), HNSW index, `updated_at` trigger, psycopg async pool
 - [x] EC2 deploy: Caddy (COPR), systemd services, Caddyfile, `config.py` SSM support, FastHTML prod mode
-- [ ] Auth + Wardrobe API: JWT (dev bypass when `DEV_MODE=true`), S3 presign/upload/delete, `/auth/*` and `/wardrobe/*`
-- [ ] Tests: psycopg3 cursor mocks, moto S3, auth + wardrobe coverage
-- [ ] Frontend: login/register, nav, upload form, gallery, HTMX delete
-- [ ] User preferences: JSONB style prefs (colors, styles, occasions), LLM prompt integration
+- [x] Auth + Wardrobe API: JWT (dev bypass when `DEV_MODE=true`), S3 presign/upload/delete, `/auth/*` and `/wardrobe/*`
+- [x] Tests: psycopg3 cursor mocks, moto S3, auth + wardrobe coverage
+- [x] Frontend: login/register, nav, upload form, gallery, HTMX delete
+- [x] User preferences: JSONB style prefs (colors, styles, occasions), LLM prompt integration
 
 **Cost:** $0 during free tier · ~$3.60/mo Elastic IP · ~$18/mo post-free-tier
 
@@ -237,8 +232,8 @@ Pydantic validation, forecast support, FastHTML frontend, S3-backed caching.
 
 **5A — CLIP Embedding Service**
 - [x] `app/services/embedding_service.py` — CLIP ViT-B/32 text encoder; lazy-import singleton; `encode_text(text) -> np.ndarray` (512-dim L2-normalized); `reset_model_for_testing()`
-- [ ] `scripts/backfill_wardrobe_embeddings.py` — backfill `wardrobe_items.embedding` for existing photos (deferred; no wardrobe photos exist yet)
-- [ ] `encode_image(url_or_s3_key)` — image encoder path (deferred; Lambda 250MB limit; will run on EC2 sidecar)
+- [ ] `encode_image(url_or_s3_key)` — CLIP ViT-B/32 image encoder path; runs on EC2 sidecar (Lambda 250MB limit); triggered after wardrobe upload to populate `wardrobe_items.embedding`
+- [ ] `scripts/backfill_wardrobe_embeddings.py` — backfill `wardrobe_items.embedding` for existing photos; fetches from S3, encodes with CLIP image encoder; run via SSH tunnel
 
 **5A.5 — Domain Protocol**
 - [x] `app/services/domain.py` — `@runtime_checkable` `Domain` Protocol with `encode_query`, `encode_item`, `parse_item`, `preference_context`
@@ -255,9 +250,9 @@ Pydantic validation, forecast support, FastHTML frontend, S3-backed caching.
 - [x] `app/services/vector_cache.py` — `lookup(query_embedding, threshold=0.15)` + `store(...)`; cosine distance ANN on `query_cache`; S3-backed candidate serialization; 24h TTL; `ON CONFLICT` upsert
 - [x] `app/services/candidate_source.py` — factory routing `DEV_MODE=true` → dev catalog; prod path stub (returns `[]` with warning)
 - [x] `llm_service.generate_search_query(preferences, weather) -> str` — 5–10 word NL query; rule-based fallback
-- [ ] `app/services/serpapi_service.py` — live product search for prod path (deferred to Week 5C remainder)
+- Production candidate source: dev catalog (Poshmark) — no live search integration planned; `candidate_source.py` prod path remains unused
 
-### 🔄 Week 6 — Two-Towers + Preference Re-ranker
+### ✅ Week 6 — Two-Towers + Preference Re-ranker
 
 **Two-Tower Model (complete)**
 - [x] `app/models/product.py` — `ProductRecommendation` Pydantic model with `similarity_score`, optional `llm_explanation`
@@ -271,16 +266,31 @@ Pydantic validation, forecast support, FastHTML frontend, S3-backed caching.
 - [x] `tests/test_recommendation_service.py` — 31 tests across UserTower, ItemTower, `rank`, `_build_user_embedding`, `recommend`, singleton lifecycle
 - [x] `llm_service.generate_explanation(top_items, weather_context, style_preferences) -> str` — 2–3 sentence explanation; gated behind `include_explanation=True`
 
-**Pending**
-- [ ] `app/services/preference_reranker.py` — Bradley-Terry on `preference_pairs`; `rerank(query, candidates)`, `update(pairs)`
-- [ ] `POST /interactions` — log click/save/dismiss events to `user_interactions`
-- [ ] `POST /preferences/pairs` — record pairwise preference signals
-- [ ] `tests/test_preference_reranker.py`
-- [ ] `scripts/pretrain_item_tower.py` — pre-train ItemTower on dev catalog embeddings (optional; Xavier init acceptable until Week 8)
+**Complete**
+- [x] `app/services/preference_reranker.py` — Bradley-Terry MM on `preference_pairs`; `get_preference_scores`, `rerank` with alpha blending
+- [x] `POST /interactions` — log click/save/dismiss events to `user_interactions`
+- [x] `POST /preferences/pairs` — record pairwise preference signals
+- [x] `tests/test_preference_reranker.py`
 
-### Week 7 — LLM Explanation + Product Cards
+### ✅ Week 7 — LLM Explanation + Product Cards
 - [x] `llm_service.generate_explanation` — narrates top-3 picks (implemented in Week 6 alongside `recommend`)
-- [ ] `product_card(product) -> Div` in `frontend/app.py`; HTMX click → `POST /interactions`
+- [x] `product_card(product) -> Div` in `frontend/app.py`; save/dismiss HTMX → `/log-interaction` → `POST /interactions`
+- [x] Frontend auth: login/register pages, session management, JWT cookie
+- [x] Frontend wardrobe: upload form, gallery grid, HTMX delete
+
+**Pending**
+- [ ] Wire `POST /recommend-products` into frontend — "Get Recommendations" flow; render `product_card` grid from API response
+
+### Image Embedding — Wardrobe Photo Encoding
+
+Currently `wardrobe_items.embedding` is always NULL — the user tower falls back to cold-start style tag encoding. Image embedding closes that gap: wardrobe photos are encoded with CLIP's image encoder and stored, so the user vector reflects actual visual taste rather than stated preferences.
+
+- [ ] `encode_image(url_or_s3_key: str) -> np.ndarray` in `embedding_service.py` — CLIP ViT-B/32 image encoder; downloads image from URL or S3 key; preprocesses with CLIP's `transform` pipeline; returns 512-dim L2-normalized float32 ndarray; runs only on EC2 (not Lambda)
+- [ ] Post-upload embedding trigger in `POST /wardrobe` — after inserting the wardrobe row, call `encode_image(image_s3_key)` and `UPDATE wardrobe_items SET embedding = %s WHERE item_id = %s`; fire-and-forget via `asyncio.create_task` so it doesn't block the 201 response
+- [ ] `scripts/backfill_wardrobe_embeddings.py` — idempotent batch script; fetches all `wardrobe_items` where `embedding IS NULL AND image_s3_key IS NOT NULL`; encodes via CLIP image encoder; writes back in batches of 50; run via SSH tunnel
+- [ ] Tests: mock CLIP image transform + model in `test_embedding_service.py`; test `encode_image` returns unit vector with correct shape
+
+> **Deployment note:** `encode_image` is imported only inside the `POST /wardrobe` endpoint handler (lazy import), keeping the Lambda package size below 250MB. The actual CLIP image encoder weights (~290MB) are only present on the EC2 instance.
 
 ### Week 8 — Training Pipeline
 - [ ] `scripts/train_two_towers.py` — interactions → triplets → `TripletMarginLoss(margin=0.2)` → `s3://fitted/models/two-towers/latest.pt`
@@ -314,7 +324,7 @@ Pydantic validation, forecast support, FastHTML frontend, S3-backed caching.
 |---|---|---|
 | Embedding model | CLIP ViT-B/32 (512-dim) | Unified image+text space; no fusion layer needed |
 | CLIP deployment | EC2 sidecar, not Lambda | Lambda 250MB limit + cold start latency |
-| Dev catalog | Poshmark seed (ingestion scripts) | Real secondhand listings; no SerpAPI spend during dev |
+| Dev catalog | Poshmark seed (ingestion scripts) | Real secondhand listings; SerpAPI integration dropped — dev catalog is the permanent candidate source |
 | Vector cache | pgvector cosine distance threshold 0.15 (≈ similarity 0.85) | Reuse candidates for semantically similar queries; cut CLIP encode cost |
 | Two-tower init | Xavier uniform (cold start) | Retrieval is semantically meaningful; ranking quality improves after Week 8 training |
 | ML platform | S3 + dbt + Airflow on EC2 | No need for Databricks at this scale |
