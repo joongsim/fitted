@@ -1022,3 +1022,117 @@ class TestRecommendProducts:
                 headers=_auth_headers(),
             )
         assert response.status_code == 500
+
+
+# ---------------------------------------------------------------------------
+# POST /preferences/pairs
+# ---------------------------------------------------------------------------
+
+from contextlib import asynccontextmanager
+
+
+def _make_mock_db_conn():
+    """Build a mock async psycopg3 connection with a cursor context manager."""
+    mock_cur = AsyncMock()
+    mock_cur.execute = AsyncMock()
+
+    mock_cur_ctx = MagicMock()
+    mock_cur_ctx.__aenter__ = AsyncMock(return_value=mock_cur)
+    mock_cur_ctx.__aexit__ = AsyncMock(return_value=False)
+
+    mock_conn = MagicMock()
+    mock_conn.cursor = MagicMock(return_value=mock_cur_ctx)
+    mock_conn.commit = AsyncMock()
+
+    return mock_conn, mock_cur
+
+
+class TestRecordPreferencePair:
+    def _db_patch(self, mock_conn):
+        @asynccontextmanager
+        async def _fake_get_connection():
+            yield mock_conn
+
+        return patch(
+            "app.main.db_service.get_connection", side_effect=_fake_get_connection
+        )
+
+    def test_valid_pair_preferred_a_returns_201(self, client):
+        mock_conn, _ = _make_mock_db_conn()
+        with self._db_patch(mock_conn):
+            response = client.post(
+                "/preferences/pairs",
+                json={"item_a_id": "item1", "item_b_id": "item2", "preferred": "a"},
+                headers=_auth_headers(),
+            )
+        assert response.status_code == 201
+        assert response.json() == {"status": "recorded"}
+
+    def test_valid_pair_preferred_b_returns_201(self, client):
+        mock_conn, _ = _make_mock_db_conn()
+        with self._db_patch(mock_conn):
+            response = client.post(
+                "/preferences/pairs",
+                json={"item_a_id": "item1", "item_b_id": "item2", "preferred": "b"},
+                headers=_auth_headers(),
+            )
+        assert response.status_code == 201
+
+    def test_invalid_preferred_value_returns_422(self, client):
+        response = client.post(
+            "/preferences/pairs",
+            json={"item_a_id": "item1", "item_b_id": "item2", "preferred": "c"},
+            headers=_auth_headers(),
+        )
+        assert response.status_code == 422
+        assert "preferred" in response.json()["detail"].lower()
+
+    def test_no_auth_returns_401(self, client):
+        response = client.post(
+            "/preferences/pairs",
+            json={"item_a_id": "item1", "item_b_id": "item2", "preferred": "a"},
+        )
+        assert response.status_code == 401
+
+    def test_missing_item_a_id_returns_422(self, client):
+        response = client.post(
+            "/preferences/pairs",
+            json={"item_b_id": "item2", "preferred": "a"},
+            headers=_auth_headers(),
+        )
+        assert response.status_code == 422
+
+    def test_missing_item_b_id_returns_422(self, client):
+        response = client.post(
+            "/preferences/pairs",
+            json={"item_a_id": "item1", "preferred": "a"},
+            headers=_auth_headers(),
+        )
+        assert response.status_code == 422
+
+    def test_db_insert_called_with_correct_args(self, client):
+        mock_conn, mock_cur = _make_mock_db_conn()
+        with self._db_patch(mock_conn):
+            client.post(
+                "/preferences/pairs",
+                json={"item_a_id": "item1", "item_b_id": "item2", "preferred": "a"},
+                headers=_auth_headers(),
+            )
+        mock_cur.execute.assert_awaited_once()
+        call_args = mock_cur.execute.call_args
+        sql, params = call_args.args
+        assert "preference_pairs" in sql
+        assert params[1] == "item1"
+        assert params[2] == "item2"
+        assert params[3] == "a"
+
+    def test_db_error_returns_500(self, client):
+        mock_conn, mock_cur = _make_mock_db_conn()
+        mock_cur.execute = AsyncMock(side_effect=RuntimeError("db down"))
+        with self._db_patch(mock_conn):
+            response = client.post(
+                "/preferences/pairs",
+                json={"item_a_id": "item1", "item_b_id": "item2", "preferred": "a"},
+                headers=_auth_headers(),
+            )
+        assert response.status_code == 500
