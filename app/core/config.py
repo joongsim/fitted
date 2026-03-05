@@ -101,7 +101,7 @@ class Config:
         (e.g. ``fitted_admin:pass@host:5432/db`` instead of the full URL),
         which causes psycopg to misparse the username as a hostname.
         """
-        url = self.get_parameter("/fitted/database-url")
+        url = os.environ.get("DATABASE_URL") or self.get_parameter("/fitted/database-url")
         if url and not url.startswith(("postgresql://", "postgres://")):
             url = "postgresql://" + url
         return url
@@ -112,6 +112,18 @@ class Config:
         value = os.environ.get("WEATHER_BUCKET_NAME")
         logger.debug("WEATHER_BUCKET_NAME: %s", value)
         return value or None
+
+    @property
+    def s3_bucket(self) -> str:
+        """Get the primary S3 bucket name from SSM or environment."""
+        value = self.get_parameter("/fitted/s3-bucket", default=None)
+        if not value:
+            value = os.environ.get("AWS_S3_BUCKET")
+        if not value:
+            raise ValueError(
+                "S3 bucket not configured: set /fitted/s3-bucket in SSM or AWS_S3_BUCKET env var"
+            )
+        return value
 
     @property
     def rapidapi_key(self) -> str:
