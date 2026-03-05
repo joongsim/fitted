@@ -12,9 +12,13 @@ User request
       ├── HIT  → return cached candidate list
       └── MISS → ANN search on catalog_items (Poshmark seed data)
                  → store results in cache
-  → Build user embedding (mean-pool wardrobe items, outfit tags, and style prefs)
+  → Build user embedding
+      ├── wardrobe items: mean-pool CLIP image embeddings (highest fidelity)
+      ├── style preference tags: mean-pool CLIP text embeddings (cold-start fallback)
+      └── generic fallback: "casual everyday clothing" (no wardrobe + no tags)
   → Two-Tower ranking: project user + item vectors, score by cosine similarity
-  → [Optional] Late interaction reranking: MaxSim over catalog patch embeddings
+  → Bradley-Terry preference reranking: blend with pairwise preference scores (no-op at cold start)
+  → [Optional] LLM explanation for top-K picks
   → Return top-K as ProductRecommendation objects
 ```
 
@@ -42,6 +46,7 @@ User request
 18. [Interaction Logging](#18-interaction-logging)
 19. [The Bradley-Terry Preference Reranker](#19-the-bradley-terry-preference-reranker)
 20. [Frontend: Wardrobe, Preferences, and Product Cards](#20-frontend-wardrobe-preferences-and-product-cards)
+21. [Image Embedding: Wardrobe Photo Encoding](#21-image-embedding-wardrobe-photo-encoding)
 
 ---
 
@@ -76,11 +81,20 @@ When the training pipeline (Week 8) runs, it overwrites those weights with learn
 
 > **Important — cold-start ranking quality:** With Xavier-initialized weights and no training data, two-tower ranking scores cluster near zero and are nearly indistinguishable across candidates. The ranking order before Week 8 is effectively random. This is expected and acceptable: the *retrieval* step (pgvector ANN search on CLIP embeddings) is semantically meaningful and returns plausible candidates; only the *reranking* step is uninformative until learned weights are loaded. Do not tune or A/B test ranking quality using the Xavier-initialized system — wait for the first trained checkpoint.
 
-### What we're _not_ building yet
+### What's complete
 
-- **Bradley-Terry preference reranker** — uses pairwise "I prefer A over B" signals collected from the UI. Deferred until there's real interaction data.
-- **CLIP image encoder** — the vision tower (~290MB) pushes us past Lambda's 250MB zip limit. We use the CLIP _text_ encoder only for now (same embedding space, much lighter).
-- **Training loop** — `scripts/train_two_towers.py` with `TripletMarginLoss`. Comes in Week 8.
+- **Two-tower ranking** — `UserTower` + `ItemTower` (Xavier init; S3 weight loading); full `recommend()` pipeline.
+- **Bradley-Terry preference reranker** — `get_preference_scores` + `rerank`; no-op at cold start; feeds from `preference_pairs` table.
+- **Interaction logging** — `POST /interactions` (click/save/dismiss) feeding future training data.
+- **Wardrobe CRUD + frontend** — upload, gallery, delete; HTMX throughout.
+- **Auth endpoints** — register, login, logout; JWT cookies.
+- **Product cards** — `product_card()` in frontend with save/dismiss fire-and-forget to `/log-interaction`.
+
+### What's next
+
+- **CLIP image encoder** — `encode_image(url_or_s3_key)` in `embedding_service.py`; runs on EC2 sidecar (Lambda 250MB limit). Triggered after wardrobe photo upload to populate `wardrobe_items.embedding`. Until this is live, the user tower always falls back to cold-start style tag encoding.
+- **Frontend recommendation flow** — wire `POST /recommend-products` into a "Shop" page or home-page section; render product card grid from API response.
+- **Training loop** — `scripts/train_two_towers.py` with `TripletMarginLoss`. Comes in Week 8 once enough interaction data accumulates.
 
 ---
 
@@ -106,7 +120,7 @@ class Item:
     price: float
     image_url: str
     product_url: str
-    source: str                         # 'poshmark_seed' | 'serpapi' | ...
+    source: str                         # 'poshmark_seed' | ...
     embedding: Optional[np.ndarray]     # 512-dim float32, L2-normalized; None until embedded
     attributes: dict = field(default_factory=dict)  # brand, size, condition, colors, ...
 ```
@@ -730,7 +744,7 @@ async def _load_items_from_s3(s3_key: str) -> Optional[list[Item]]:
 
 **File:** `app/services/dev_catalog_service.py`
 
-This service retrieves candidates from the `catalog_items` table — populated by the Poshmark ingestion script. It's the "fast path" candidate source used in dev and before SerpAPI live search is integrated.
+This service retrieves candidates from the `catalog_items` table — populated by the Poshmark ingestion script. It is the production candidate source; no live search integration is planned.
 
 ```python
 import logging
@@ -2769,6 +2783,171 @@ def nav_bar(session) -> Nav:
 
 ---
 
+## 21. Image Embedding: Wardrobe Photo Encoding
+
+### Why this matters
+
+`_build_user_embedding` currently builds the user vector from style preference tags (`"streetwear"`, `"navy"`) when no wardrobe embeddings exist. Text tags are useful priors, but they are stated preferences — the user describing how they _want_ to dress rather than what they actually own.
+
+Wardrobe photo embeddings are a much stronger signal. A photo of a navy blazer the user actually owns will embed in exactly the same CLIP space as the catalog items being ranked, producing a user vector that reflects demonstrated visual taste. Mean-pooling ten wardrobe item images gives the user tower a "centre of mass" in CLIP space that is far more informative than mean-pooling abstract style tags.
+
+Until `encode_image` is live and wardrobe items have embeddings, the user tower always falls back to cold-start behaviour — effectively ignoring uploaded photos.
+
+### The image encoder path
+
+CLIP ViT-B/32 has two encoders in the same shared embedding space:
+- **Text encoder** (~150MB unzipped): already live in `embedding_service.encode_text`
+- **Image encoder** (~290MB unzipped): exceeds Lambda's 250MB zip limit
+
+The image encoder therefore runs on the EC2 sidecar alongside the FastHTML frontend. Lambda endpoints that need image embeddings call it via internal HTTP, the same pattern described in `plan.md`.
+
+### `encode_image` implementation
+
+**File:** `app/services/embedding_service.py` (addition)
+
+```python
+def encode_image(url_or_s3_key: str) -> np.ndarray:
+    """
+    Encode an image using the CLIP ViT-B/32 image encoder.
+
+    Accepts either a public URL or an S3 key (fetched via boto3).
+    Preprocesses with CLIP's standard image transform (224×224 centre crop,
+    normalisation), runs through the image encoder, L2-normalises.
+
+    Returns a 512-dim float32 numpy array, unit norm — the same embedding
+    space as encode_text. A photo of a "navy blazer" and the text
+    "navy blazer" will be near neighbours after encoding.
+
+    Only runs on EC2 (not Lambda — image encoder weights ~290MB exceed
+    Lambda's 250MB unzipped package limit). Do not import this function
+    in any code that runs on Lambda.
+
+    Args:
+        url_or_s3_key: Public URL (https://...) or S3 key (wardrobe-images/...).
+
+    Returns:
+        np.ndarray of shape (512,), dtype float32, unit norm.
+    """
+    import io
+    import torch
+    from PIL import Image
+    import requests
+
+    model, _, transform = _load_model_with_transform()  # extended loader that returns transform
+
+    # Fetch image bytes
+    if url_or_s3_key.startswith("http"):
+        resp = requests.get(url_or_s3_key, timeout=10)
+        resp.raise_for_status()
+        image_bytes = resp.content
+    else:
+        import boto3
+        from app.core.config import config
+        s3 = boto3.client("s3")
+        obj = s3.get_object(Bucket=config.weather_bucket_name, Key=url_or_s3_key)
+        image_bytes = obj["Body"].read()
+
+    image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+    image_tensor = transform(image).unsqueeze(0)   # (1, 3, 224, 224)
+
+    with torch.no_grad():
+        features = model.encode_image(image_tensor)
+        features = features / features.norm(dim=-1, keepdim=True)
+
+    embedding: np.ndarray = features.cpu().numpy().astype(np.float32)[0]
+    logger.debug(
+        "encode_image: key=%r shape=%s norm=%.4f",
+        url_or_s3_key[:80],
+        embedding.shape,
+        float(np.linalg.norm(embedding)),
+    )
+    return embedding
+```
+
+`_load_model_with_transform()` is the extended version of `_load_model()` that also returns the preprocessing transform:
+
+```python
+def _load_model_with_transform():
+    """Load CLIP model + image transform. Cached after first call."""
+    global _model, _tokenizer, _transform
+    if _model is not None:
+        return _model, _tokenizer, _transform
+
+    import open_clip, torch
+    model, _, transform = open_clip.create_model_and_transforms(
+        _CLIP_MODEL, pretrained=_CLIP_PRETRAINED
+    )
+    model.eval()
+    tokenizer = open_clip.get_tokenizer(_CLIP_MODEL)
+    _model, _tokenizer, _transform = model, tokenizer, transform
+    return _model, _tokenizer, _transform
+```
+
+### Post-upload embedding trigger
+
+After inserting a wardrobe item in `POST /wardrobe`, the backend schedules image encoding as a background task so the 201 response is not blocked:
+
+```python
+# In app/main.py — inside add_wardrobe_item, after wardrobe_service.create_wardrobe_item()
+
+if image_s3_key:
+    async def _embed_and_store(item_id: str, s3_key: str) -> None:
+        try:
+            from app.services.embedding_service import encode_image
+            vec = encode_image(s3_key)
+            async with db_service.get_connection() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute(
+                        "UPDATE wardrobe_items SET embedding = %s::vector WHERE item_id = %s",
+                        (vec.tolist(), item_id),
+                    )
+                    await conn.commit()
+            logger.info("Wardrobe image embedded: item_id=%s", item_id)
+        except Exception:
+            logger.error("Failed to embed wardrobe image: item_id=%s", item_id, exc_info=True)
+
+    asyncio.create_task(_embed_and_store(item["item_id"], image_s3_key))
+```
+
+The task is fire-and-forget: if encoding fails (network error, model not warm), the item row keeps `embedding = NULL` and `_build_user_embedding` degrades to style tag encoding. No user-facing impact.
+
+### Backfill script
+
+**File:** `scripts/backfill_wardrobe_embeddings.py`
+
+Same pattern as `scripts/backfill_catalog_embeddings.py`:
+
+```bash
+# Open SSH tunnel to RDS, then:
+PYTHONPATH=. DATABASE_URL=postgresql://fitted:password@localhost:5432/fitted \
+    python scripts/backfill_wardrobe_embeddings.py
+```
+
+Idempotent: only fetches rows where `embedding IS NULL AND image_s3_key IS NOT NULL`. Processes in batches of 50, commits after each batch. Can be interrupted and resumed.
+
+### Testing
+
+Mock `_load_model_with_transform` and `requests.get` (or `boto3.client`) to avoid real network/model calls:
+
+```python
+def test_encode_image_returns_512_dim_unit_vector():
+    mock_model = MagicMock()
+    mock_features = torch.ones(1, 512)
+    mock_model.encode_image.return_value = mock_features
+    mock_transform = MagicMock(return_value=torch.zeros(3, 224, 224))
+
+    with patch("app.services.embedding_service._load_model_with_transform",
+               return_value=(mock_model, None, mock_transform)):
+        with patch("requests.get") as mock_get:
+            mock_get.return_value.content = _fake_jpeg_bytes()
+            result = encode_image("https://example.com/jacket.jpg")
+
+    assert result.shape == (512,)
+    assert abs(np.linalg.norm(result) - 1.0) < 1e-5
+```
+
+---
+
 ## Summary of Files
 
 | File | Purpose |
@@ -2795,6 +2974,8 @@ def nav_bar(session) -> Nav:
 | `app/services/preference_reranker.py` | Bradley-Terry MM reranker + `get_preference_scores` |
 | `tests/test_wardrobe_service.py` | Wardrobe CRUD tests (mock psycopg3) |
 | `tests/test_preference_reranker.py` | Bradley-Terry MM + rerank blending tests |
+| `app/services/embedding_service.py` *(pending)* | `encode_image(url_or_s3_key)` — CLIP image encoder for wardrobe photos |
+| `scripts/backfill_wardrobe_embeddings.py` *(pending)* | Backfill `wardrobe_items.embedding` from S3 images |
 
 ---
 

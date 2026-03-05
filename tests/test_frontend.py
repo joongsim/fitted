@@ -9,6 +9,7 @@ Strategy:
 - For routes that call the backend API, mock httpx.AsyncClient so no real
   HTTP requests are made.
 """
+
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -126,7 +127,9 @@ class TestLoginPage:
         response = client.get("/login")
         assert b"password" in response.content.lower()
 
-    def test_login_page_redirects_to_home_when_already_authenticated(self, authed_client):
+    def test_login_page_redirects_to_home_when_already_authenticated(
+        self, authed_client
+    ):
         response = authed_client.get("/login")
         # Already logged-in users are redirected away from /login
         # FastHTML's RedirectResponse uses 303 by default; Starlette may use 307
@@ -218,7 +221,11 @@ class TestRegisterPost:
             )
             response = client.post(
                 "/register",
-                data={"full_name": "New User", "email": "new@example.com", "password": "pw"},
+                data={
+                    "full_name": "New User",
+                    "email": "new@example.com",
+                    "password": "pw",
+                },
             )
         assert response.status_code in (302, 303)
         assert "/login" in response.headers.get("location", "")
@@ -232,7 +239,11 @@ class TestRegisterPost:
             )
             response = client.post(
                 "/register",
-                data={"full_name": "Existing", "email": "existing@example.com", "password": "pw"},
+                data={
+                    "full_name": "Existing",
+                    "email": "existing@example.com",
+                    "password": "pw",
+                },
             )
         assert response.status_code == 200
         assert b"already exists" in response.content
@@ -317,7 +328,10 @@ class TestGetOutfit:
             mock_instance.post.side_effect = Exception("Connection refused")
             response = client.post("/get-outfit", data={"location": "London"})
         assert response.status_code == 200
-        assert b"Connection error" in response.content or b"could not reach" in response.content
+        assert (
+            b"Connection error" in response.content
+            or b"could not reach" in response.content
+        )
 
     def test_authenticated_request_sends_bearer_token(self, authed_client):
         with patch("httpx.AsyncClient") as mock_http:
@@ -346,3 +360,209 @@ class TestGetOutfit:
         call_kwargs = mock_instance.post.call_args
         headers = call_kwargs[1].get("headers", {})
         assert "Authorization" not in headers
+
+    def test_authenticated_outfit_response_includes_shop_button(self, authed_client):
+        """Logged-in users see a 'Get Recommendations' button after outfit results."""
+        with patch("httpx.AsyncClient") as mock_http:
+            mock_instance = AsyncMock()
+            mock_http.return_value.__aenter__.return_value = mock_instance
+            mock_instance.post.return_value = _make_http_response(
+                200, MOCK_BACKEND_OUTFIT_RESPONSE
+            )
+            response = authed_client.post("/get-outfit", data={"location": "London"})
+        assert response.status_code == 200
+        assert b"get-recommendations" in response.content
+
+    def test_unauthenticated_outfit_response_excludes_shop_button(self, client):
+        """Anonymous users do not see the 'Get Recommendations' button."""
+        with patch("httpx.AsyncClient") as mock_http:
+            mock_instance = AsyncMock()
+            mock_http.return_value.__aenter__.return_value = mock_instance
+            mock_instance.post.return_value = _make_http_response(
+                200, MOCK_BACKEND_OUTFIT_RESPONSE
+            )
+            response = client.post("/get-outfit", data={"location": "London"})
+        assert response.status_code == 200
+        assert b"get-recommendations" not in response.content
+
+
+# ---------------------------------------------------------------------------
+# GET /recommendations
+# ---------------------------------------------------------------------------
+
+MOCK_BACKEND_RECOMMENDATIONS_RESPONSE = {
+    "user_id": "abc-123",
+    "location": "London",
+    "weather": {"temp_c": 12.0, "condition": "Partly cloudy", "location": "London"},
+    "count": 2,
+    "recommendations": [
+        {
+            "item_id": "item-1",
+            "title": "Navy Slim-Fit Chinos",
+            "price": 45.0,
+            "product_url": "https://poshmark.com/listing/1",
+            "image_url": "https://example.com/img1.jpg",
+            "similarity_score": 0.87,
+            "attributes": {"brand": "Gap", "category": "bottoms"},
+            "llm_explanation": None,
+        },
+        {
+            "item_id": "item-2",
+            "title": "White Oxford Shirt",
+            "price": 30.0,
+            "product_url": "https://poshmark.com/listing/2",
+            "image_url": None,
+            "similarity_score": 0.82,
+            "attributes": {"brand": "J.Crew", "category": "tops"},
+            "llm_explanation": None,
+        },
+    ],
+}
+
+
+class TestRecommendationsPage:
+    def test_recommendations_page_redirects_when_unauthenticated(self, client):
+        response = client.get("/recommendations")
+        assert response.status_code in (302, 303, 307)
+        assert "/login" in response.headers.get("location", "")
+
+    def test_recommendations_page_returns_200_when_authenticated(self, authed_client):
+        response = authed_client.get("/recommendations")
+        assert response.status_code == 200
+
+    def test_recommendations_page_contains_form(self, authed_client):
+        response = authed_client.get("/recommendations")
+        assert b"get-recommendations" in response.content
+
+    def test_recommendations_page_shows_nav_link(self, authed_client):
+        response = authed_client.get("/recommendations")
+        assert (
+            b"Recs" in response.content
+            or b"recommendations" in response.content.lower()
+        )
+
+
+# ---------------------------------------------------------------------------
+# POST /get-recommendations
+# ---------------------------------------------------------------------------
+
+
+class TestGetRecommendations:
+    def test_unauthenticated_returns_login_prompt(self, client):
+        response = client.post("/get-recommendations", data={"location": "London"})
+        assert response.status_code == 200
+        assert b"log in" in response.content.lower()
+
+    def test_successful_response_returns_product_cards(self, authed_client):
+        with patch("httpx.AsyncClient") as mock_http:
+            mock_instance = AsyncMock()
+            mock_http.return_value.__aenter__.return_value = mock_instance
+            mock_instance.post.return_value = _make_http_response(
+                200, MOCK_BACKEND_RECOMMENDATIONS_RESPONSE
+            )
+            response = authed_client.post(
+                "/get-recommendations", data={"location": "London"}
+            )
+        assert response.status_code == 200
+        assert b"Navy Slim-Fit Chinos" in response.content
+        assert b"White Oxford Shirt" in response.content
+
+    def test_successful_response_includes_weather_meta(self, authed_client):
+        with patch("httpx.AsyncClient") as mock_http:
+            mock_instance = AsyncMock()
+            mock_http.return_value.__aenter__.return_value = mock_instance
+            mock_instance.post.return_value = _make_http_response(
+                200, MOCK_BACKEND_RECOMMENDATIONS_RESPONSE
+            )
+            response = authed_client.post(
+                "/get-recommendations", data={"location": "London"}
+            )
+        assert response.status_code == 200
+        assert b"London" in response.content
+        assert b"Partly cloudy" in response.content
+
+    def test_backend_error_returns_error_message(self, authed_client):
+        with patch("httpx.AsyncClient") as mock_http:
+            mock_instance = AsyncMock()
+            mock_http.return_value.__aenter__.return_value = mock_instance
+            mock_instance.post.return_value = _make_http_response(
+                500, {"detail": "Internal server error"}
+            )
+            response = authed_client.post(
+                "/get-recommendations", data={"location": "London"}
+            )
+        assert response.status_code == 200
+        assert b"Error" in response.content or b"error" in response.content
+
+    def test_empty_recommendations_shows_no_results_message(self, authed_client):
+        empty_resp = {
+            **MOCK_BACKEND_RECOMMENDATIONS_RESPONSE,
+            "recommendations": [],
+            "count": 0,
+        }
+        with patch("httpx.AsyncClient") as mock_http:
+            mock_instance = AsyncMock()
+            mock_http.return_value.__aenter__.return_value = mock_instance
+            mock_instance.post.return_value = _make_http_response(200, empty_resp)
+            response = authed_client.post(
+                "/get-recommendations", data={"location": "London"}
+            )
+        assert response.status_code == 200
+        assert b"No recommendations" in response.content
+
+    def test_network_error_shows_connection_error(self, authed_client):
+        with patch("httpx.AsyncClient") as mock_http:
+            mock_instance = AsyncMock()
+            mock_http.return_value.__aenter__.return_value = mock_instance
+            mock_instance.post.side_effect = Exception("Connection refused")
+            response = authed_client.post(
+                "/get-recommendations", data={"location": "London"}
+            )
+        assert response.status_code == 200
+        assert (
+            b"Connection error" in response.content
+            or b"could not reach" in response.content
+        )
+
+    def test_sends_bearer_token_to_backend(self, authed_client):
+        with patch("httpx.AsyncClient") as mock_http:
+            mock_instance = AsyncMock()
+            mock_http.return_value.__aenter__.return_value = mock_instance
+            mock_instance.post.return_value = _make_http_response(
+                200, MOCK_BACKEND_RECOMMENDATIONS_RESPONSE
+            )
+            authed_client.post("/get-recommendations", data={"location": "London"})
+
+        call_kwargs = mock_instance.post.call_args
+        headers = call_kwargs[1].get("headers", {})
+        assert "Authorization" in headers
+        assert headers["Authorization"].startswith("Bearer ")
+
+    def test_sends_correct_json_body_to_backend(self, authed_client):
+        with patch("httpx.AsyncClient") as mock_http:
+            mock_instance = AsyncMock()
+            mock_http.return_value.__aenter__.return_value = mock_instance
+            mock_instance.post.return_value = _make_http_response(
+                200, MOCK_BACKEND_RECOMMENDATIONS_RESPONSE
+            )
+            authed_client.post("/get-recommendations", data={"location": "Paris"})
+
+        call_kwargs = mock_instance.post.call_args
+        payload = call_kwargs[1].get("json", {})
+        assert payload.get("location") == "Paris"
+        assert payload.get("include_explanation") is False
+
+    def test_product_card_placeholder_shown_when_no_image(self, authed_client):
+        """Items without image_url render the placeholder emoji."""
+        with patch("httpx.AsyncClient") as mock_http:
+            mock_instance = AsyncMock()
+            mock_http.return_value.__aenter__.return_value = mock_instance
+            mock_instance.post.return_value = _make_http_response(
+                200, MOCK_BACKEND_RECOMMENDATIONS_RESPONSE
+            )
+            response = authed_client.post(
+                "/get-recommendations", data={"location": "London"}
+            )
+        assert response.status_code == 200
+        # White Oxford Shirt has no image_url — placeholder div should appear
+        assert b"product-card-placeholder" in response.content
