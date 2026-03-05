@@ -76,6 +76,10 @@ def load_catalog_embeddings(conn: psycopg.Connection) -> np.ndarray:
 
     vecs = []
     for (emb_raw,) in rows:
+        if isinstance(emb_raw, str):
+            import json
+
+            emb_raw = json.loads(emb_raw)
         vec = (
             emb_raw
             if isinstance(emb_raw, np.ndarray)
