@@ -1,6 +1,6 @@
 # Fitted — Engineering Plan
 
-**Status:** Image embedding + frontend rec flow complete — Week 8 training pipeline next
+**Status:** Image embedding + frontend recommendations complete — Week 8 training pipeline next
 **Stack:** FastHTML on EC2 · FastAPI on Lambda · PostgreSQL + pgvector on RDS · S3 · CLIP ViT-B/32
 
 ---
@@ -278,16 +278,17 @@ Pydantic validation, forecast support, FastHTML frontend, S3-backed caching.
 - [x] Frontend auth: login/register pages, session management, JWT cookie
 - [x] Frontend wardrobe: upload form, gallery grid, HTMX delete
 
-### ✅ Image Embedding + Frontend Recommendations
+### ✅ Image Embedding — Wardrobe Photo Encoding
 
-- [x] `encode_image(url_or_s3_key: str) -> np.ndarray` in `embedding_service.py` — CLIP ViT-B/32 image encoder; L2-normalized 512-dim; EC2 only
-- [x] Post-upload fire-and-forget `asyncio.create_task` in `POST /wardrobe`
-- [x] `scripts/backfill_wardrobe_embeddings.py` — idempotent batch backfill; 10 tests passing
-- [x] Wire `POST /recommend-products` into frontend — `/recommendations` page + `POST /get-recommendations` HTMX endpoint; `product_card` grid; 40 frontend tests passing
+- [x] `encode_image(url_or_s3_key: str) -> np.ndarray` in `embedding_service.py` — CLIP ViT-B/32 image encoder; downloads image from URL or S3 key; returns 512-dim L2-normalized float32 ndarray
+- [x] Post-upload embedding trigger in `POST /wardrobe` — fire-and-forget via `asyncio.create_task`
+- [x] `scripts/backfill_wardrobe_embeddings.py` — idempotent batch script
+- [x] Tests: 10/10 passing
+- [x] Wire `POST /recommend-products` into frontend — `/recommendations` page + `POST /get-recommendations` HTMX endpoint; `product_card` grid; nav "Recs" link; shop button on outfit page; 40/40 frontend tests
 
-### ✅ Week 8 — Training Pipeline
-- [x] `scripts/train_two_towers.py` — interactions → triplets → `TripletMarginLoss(margin=0.2)` → `s3://fitted/models/two-towers/latest.pt`; MLflow experiment tracking; `--epochs`, `--lr`, `--margin`, `--dry-run` flags; 20 tests passing
-- [x] `scripts/pretrain_item_tower.py` — MSE reconstruction pre-training on catalog CLIP embeddings; warm start before interaction data; preserves existing UserTower on S3; cosine LR schedule; 11 tests passing
+### Week 8 — Training Pipeline
+- [ ] `scripts/train_two_towers.py` — interactions → triplets → `TripletMarginLoss(margin=0.2)` → `s3://fitted/models/two-towers/latest.pt`
+- [ ] MLflow experiment tracking
 
 ### Weeks 13–16 — Affiliate Monetization
 - [ ] Affiliate network integrations: Amazon Associates, ShopStyle, Rakuten
