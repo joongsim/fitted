@@ -47,6 +47,7 @@ User request
 19. [The Bradley-Terry Preference Reranker](#19-the-bradley-terry-preference-reranker)
 20. [Frontend: Wardrobe, Preferences, and Product Cards](#20-frontend-wardrobe-preferences-and-product-cards)
 21. [Image Embedding: Wardrobe Photo Encoding](#21-image-embedding-wardrobe-photo-encoding)
+22. [Training Pipeline: Two-Tower Learning from Interactions](#22-training-pipeline-two-tower-learning-from-interactions)
 
 ---
 
@@ -2974,8 +2975,101 @@ def test_encode_image_returns_512_dim_unit_vector():
 | `app/services/preference_reranker.py` | Bradley-Terry MM reranker + `get_preference_scores` |
 | `tests/test_wardrobe_service.py` | Wardrobe CRUD tests (mock psycopg3) |
 | `tests/test_preference_reranker.py` | Bradley-Terry MM + rerank blending tests |
-| `app/services/embedding_service.py` *(pending)* | `encode_image(url_or_s3_key)` — CLIP image encoder for wardrobe photos |
-| `scripts/backfill_wardrobe_embeddings.py` *(pending)* | Backfill `wardrobe_items.embedding` from S3 images |
+| `app/services/embedding_service.py` | `encode_image(url_or_s3_key)` — CLIP image encoder for wardrobe photos |
+| `scripts/backfill_wardrobe_embeddings.py` | Backfill `wardrobe_items.embedding` from S3 images |
+| `scripts/train_two_towers.py` | Train UserTower + ItemTower on interaction triplets; MLflow logging; upload weights to S3 |
+| `tests/test_train_two_towers.py` | 20 tests — data loading, triplet construction, training shapes, S3 upload round-trip |
+
+---
+
+## 22. Training Pipeline: Two-Tower Learning from Interactions
+
+### Why train at all?
+
+Xavier-initialized tower weights score every item based purely on CLIP-space geometry — the user embedding and item embeddings are projected through random linear layers. The relative distances in projected space are essentially noise. The retrieval step (pgvector ANN on CLIP embeddings) returns plausible candidates, but the ranking step cannot distinguish a user's preferred style from any other style until the towers see real feedback.
+
+The training pipeline converts `click`, `save`, and `dismiss` interactions into **triplets** that teach the towers to:
+- Pull preferred items (clicks/saves) closer to the user in projected space
+- Push dismissed items further away
+
+After one training run, the tower weights encode real user taste signals. The inference path (`recommendation_service.py`) automatically loads the updated weights from S3 on the next restart.
+
+### Triplet construction
+
+Each training example is a 3-tuple `(anchor, positive, negative)`:
+- **anchor** — user's mean-pooled wardrobe embedding (same vector `_build_user_embedding` uses at inference time)
+- **positive** — embedding of a catalog item the user clicked or saved
+- **negative** — embedding of a dismissed item; falls back to a random catalog item when no dismissals exist
+
+Users with no wardrobe embeddings (no uploaded photos encoded yet) are skipped — their anchor would be the cold-start style-tag vector which is noisier.
+
+### Architecture
+
+Both towers are `nn.Linear(512, 512, bias=False)`, Xavier-initialized, the same shape as the numpy matrices in `recommendation_service.py`. At training time PyTorch's autograd computes gradients through both towers jointly:
+
+```python
+user_tower  = nn.Linear(512, 512, bias=False)
+item_tower  = nn.Linear(512, 512, bias=False)
+
+a_proj = user_tower(anchors)    # (N, 512)
+p_proj = item_tower(positives)  # (N, 512)
+n_proj = item_tower(negatives)  # (N, 512)
+
+loss = TripletMarginWithDistanceLoss(
+    distance_function=lambda a, b: 1 - cosine_similarity(a, b),
+    margin=0.2,
+)(a_proj, p_proj, n_proj)
+```
+
+### Weight serialization
+
+After training, weights are saved in the exact format `recommendation_service._load_towers_from_s3` expects:
+
+```python
+torch.save(
+    {"user_tower_W": user_tower.weight.data, "item_tower_W": item_tower.weight.data},
+    buffer,
+)
+s3.put_object(Bucket=bucket, Key="models/two-towers/latest.pt", Body=buffer)
+```
+
+At inference time:
+```python
+state = torch.load(buffer, weights_only=True)
+self.W = state["user_tower_W"].numpy()  # (512, 512)
+# projected = self.W @ user_embedding   # (512,) @ (512, 512) ... wait
+```
+
+For 1-D inputs, `nn.Linear.weight @ x` and `nn.Linear.forward(x)` are equivalent (both compute `W @ x` vs `x @ W.T`; identical for square matrices). See the note in `upload_weights_to_s3` in the script.
+
+### MLflow integration
+
+Each training run logs:
+- **Params**: `epochs`, `lr`, `margin`, `n_triplets`
+- **Metrics**: `n_triplets` (placeholder — loss curve logging in a future iteration)
+- **Artifacts**: serialized `user_tower_W.pt`, `item_tower_W.pt`
+
+Set `MLFLOW_TRACKING_URI` to enable; silently skipped otherwise (graceful degradation for local runs).
+
+### Usage
+
+```bash
+# Open SSH tunnel to RDS (port 5432), then:
+PYTHONPATH=. \
+    DATABASE_URL=postgresql://fitted:password@localhost:5432/fitted \
+    AWS_S3_BUCKET=fitted-wardrobe-dev \
+    MLFLOW_TRACKING_URI=http://localhost:5000 \
+    python scripts/train_two_towers.py --epochs 50 --lr 1e-3 --margin 0.2
+
+# Dry run — reports triplet count without training:
+python scripts/train_two_towers.py --dry-run
+```
+
+### When to run
+
+Run after accumulating at least a few hundred interaction rows. The Xavier-initialized model already returns semantically relevant candidates via CLIP retrieval — training improves the *ranking* within those candidates. Without meaningful interaction data, the trained weights may overfit to noise.
+
+A cron job on EC2 running the script nightly (once users are active) is the simplest operational setup. The model reloads automatically on the next `RecommendationService` initialization (Lambda cold start or EC2 service restart).
 
 ---
 
@@ -2993,3 +3087,5 @@ The following sections were added after the initial implementation draft:
   - **Section 18**: Interaction logging — `user_interactions` and `preference_pairs` schemas, fire-and-forget HTMX pattern for frontend interaction buttons
   - **Section 19**: Bradley-Terry preference reranker — MM algorithm (pure numpy), cold-start no-op, score blending with `alpha=0.3`, integration point in `RecommendationService.recommend()`
   - **Section 20**: Frontend surfaces — wardrobe gallery + upload form, style preferences form, product cards with save/dismiss buttons, nav bar updates
+- **Section 21**: Image embedding — `encode_image(url_or_s3_key)` CLIP image encoder, post-upload `asyncio.create_task` trigger, `backfill_wardrobe_embeddings.py`
+- **Section 22**: Training pipeline — `scripts/train_two_towers.py`; interaction → triplet construction; `TripletMarginWithDistanceLoss`; S3 weight upload; MLflow run logging
