@@ -191,6 +191,28 @@ CREATE TABLE IF NOT EXISTS preference_pairs (
 -- Index for per-user Bradley-Terry model fitting
 CREATE INDEX IF NOT EXISTS idx_pairs_user
     ON preference_pairs (user_id);
+
+-- Affiliate click tracking — server-side redirect log for conversion attribution.
+-- Every product card click goes through GET /r/{click_id} which marks clicked_at.
+-- Network-specific affiliate URL is stored here so we don't expose query params in HTML.
+CREATE TABLE IF NOT EXISTS affiliate_clicks (
+    click_id      UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id       UUID REFERENCES users(user_id) ON DELETE CASCADE,
+    item_id       TEXT REFERENCES catalog_items(item_id),
+    original_url  TEXT NOT NULL,
+    affiliate_url TEXT NOT NULL,
+    network       VARCHAR NOT NULL DEFAULT 'none',  -- 'amazon' | 'shopstyle' | 'rakuten' | 'none'
+    created_at    TIMESTAMPTZ DEFAULT NOW(),
+    clicked_at    TIMESTAMPTZ                        -- NULL until the redirect fires
+);
+
+-- Index for analytics: affiliate revenue per user per day
+CREATE INDEX IF NOT EXISTS idx_affiliate_clicks_user
+    ON affiliate_clicks (user_id, created_at DESC);
+
+-- Index for fast redirect lookups by click_id (primary key covers this; added for clarity)
+CREATE INDEX IF NOT EXISTS idx_affiliate_clicks_clicked_at
+    ON affiliate_clicks (clicked_at) WHERE clicked_at IS NOT NULL;
 """
 
 
