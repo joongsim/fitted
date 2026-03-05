@@ -199,8 +199,10 @@ async def update_wardrobe_item(
     Update mutable metadata on a wardrobe item, enforcing ownership.
 
     Only the fields explicitly passed (non-None) are updated; omitted fields
-    retain their current database values.  Returns the updated row as a dict,
-    or ``None`` if the item does not exist or is not owned by ``user_id``.
+    retain their current database values.  Raises ``ValueError`` if all three
+    fields are None (callers should surface this as HTTP 422).  Returns the
+    updated row as a dict, or ``None`` if the item does not exist or is not
+    owned by ``user_id``.
 
     Args:
         user_id: UUID of the requesting user.
@@ -214,7 +216,7 @@ async def update_wardrobe_item(
         success; ``None`` if the item was not found or is not owned by the user.
     """
     set_clauses: list[str] = []
-    params: list = []
+    params: list[object] = []
 
     if name is not None:
         set_clauses.append("name = %s")
@@ -227,9 +229,9 @@ async def update_wardrobe_item(
         params.append(tags)
 
     if not set_clauses:
-        return await get_wardrobe_item(user_id, item_id)
+        raise ValueError("At least one field (name, category, tags) must be provided.")
 
-    sql = f"""
+    update_sql = f"""
         UPDATE wardrobe_items
         SET {', '.join(set_clauses)}
         WHERE item_id = %s AND user_id = %s
@@ -239,7 +241,7 @@ async def update_wardrobe_item(
 
     async with get_connection() as conn:
         async with conn.cursor() as cur:
-            await cur.execute(sql, params)
+            await cur.execute(update_sql, params)
             row = await cur.fetchone()
             await conn.commit()
 

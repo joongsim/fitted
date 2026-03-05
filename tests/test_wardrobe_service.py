@@ -279,6 +279,7 @@ class TestUpdateWardrobeItem:
             )
 
         assert result is not None
+        assert result["item_id"] == str(_ITEM_ID)
         assert result["name"] == "Updated Blazer"
         assert result["category"] == "tops"
         assert result["tags"] == ["blue"]
@@ -309,7 +310,7 @@ class TestUpdateWardrobeItem:
         mock_conn.commit.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_where_clause_includes_user_id(self):
+    async def test_where_clause_includes_user_id_and_executes_update(self):
         mock_conn, mock_cur = _make_mock_conn(fetchone_return=None)
 
         with patch(_PATCH_CONN, return_value=_mock_get_connection(mock_conn)):
@@ -318,6 +319,25 @@ class TestUpdateWardrobeItem:
             )
 
         mock_cur.execute.assert_awaited_once()
-        params = mock_cur.execute.call_args[0][1]
+        call_sql, params = mock_cur.execute.call_args[0]
+        # Ownership check: both IDs must appear in the WHERE clause parameters
         assert str(_ITEM_ID) in params
         assert _USER_ID in params
+        # Must be an UPDATE, not a SELECT (distinguishes from the empty-body fallback path)
+        assert "UPDATE" in call_sql
+
+    @pytest.mark.asyncio
+    async def test_empty_body_raises_value_error(self):
+        """All-None fields must raise ValueError — callers surface this as HTTP 422."""
+        mock_conn, mock_cur = _make_mock_conn()
+
+        with patch(_PATCH_CONN, return_value=_mock_get_connection(mock_conn)):
+            with pytest.raises(ValueError, match="At least one field"):
+                await wardrobe_service.update_wardrobe_item(
+                    user_id=_USER_ID,
+                    item_id=str(_ITEM_ID),
+                    # name, category, tags all default to None
+                )
+
+        # No DB query should have been executed
+        mock_cur.execute.assert_not_awaited()

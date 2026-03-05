@@ -808,29 +808,45 @@ async def update_wardrobe_item_endpoint(
     """
     Update name, category, and/or tags on a wardrobe item.
 
-    All fields are optional — only provided fields are changed (PATCH semantics
-    via PUT).  Ownership is enforced: 404 when the item doesn't exist or belongs
-    to a different user.
+    All fields are optional — only provided fields are changed (partial update
+    semantics).  At least one field must be non-null; an empty body returns 422.
+    Ownership is enforced: 404 when the item doesn't exist or belongs to a
+    different user.
     """
     from app.services import wardrobe_service
     from app.services.storage_service import get_image_presigned_url
     from app.models.wardrobe import WardrobeItemResponse
 
-    item = await wardrobe_service.update_wardrobe_item(
-        user_id=user_id,
-        item_id=item_id,
-        name=body.name,
-        category=body.category,
-        tags=body.tags,
-    )
+    try:
+        item = await wardrobe_service.update_wardrobe_item(
+            user_id=user_id,
+            item_id=item_id,
+            name=body.name,
+            category=body.category,
+            tags=body.tags,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        )
+
     if item is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Wardrobe item not found"
         )
 
-    image_url = (
-        get_image_presigned_url(item["image_s3_key"]) if item["image_s3_key"] else None
-    )
+    try:
+        image_url = (
+            get_image_presigned_url(item["image_s3_key"])
+            if item["image_s3_key"]
+            else None
+        )
+    except Exception:
+        logger.error(
+            "PUT /wardrobe/%s: failed to generate presigned URL", item_id, exc_info=True
+        )
+        image_url = None
+
     logger.info("PUT /wardrobe/%s: updated by user_id=%s", item_id, user_id)
     return WardrobeItemResponse(
         item_id=item["item_id"],
