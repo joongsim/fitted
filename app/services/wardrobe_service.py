@@ -186,3 +186,84 @@ async def delete_wardrobe_item(user_id: str, item_id: str) -> bool:
             user_id,
         )
     return bool(deleted)
+
+
+async def update_wardrobe_item(
+    user_id: str,
+    item_id: str,
+    name: Optional[str] = None,
+    category: Optional[str] = None,
+    tags: Optional[list[str]] = None,
+) -> Optional[dict]:
+    """
+    Update mutable metadata on a wardrobe item, enforcing ownership.
+
+    Only the fields explicitly passed (non-None) are updated; omitted fields
+    retain their current database values.  Returns the updated row as a dict,
+    or ``None`` if the item does not exist or is not owned by ``user_id``.
+
+    Args:
+        user_id: UUID of the requesting user.
+        item_id: UUID of the wardrobe item to update.
+        name: New display name, or None to leave unchanged.
+        category: New category, or None to leave unchanged.
+        tags: New tag list, or None to leave unchanged.
+
+    Returns:
+        Dict with item_id, name, category, image_s3_key, tags, created_at on
+        success; ``None`` if the item was not found or is not owned by the user.
+    """
+    set_clauses: list[str] = []
+    params: list = []
+
+    if name is not None:
+        set_clauses.append("name = %s")
+        params.append(name)
+    if category is not None:
+        set_clauses.append("category = %s")
+        params.append(category)
+    if tags is not None:
+        set_clauses.append("tags = %s")
+        params.append(tags)
+
+    if not set_clauses:
+        return await get_wardrobe_item(user_id, item_id)
+
+    sql = f"""
+        UPDATE wardrobe_items
+        SET {', '.join(set_clauses)}
+        WHERE item_id = %s AND user_id = %s
+        RETURNING item_id, name, category, image_s3_key, tags, created_at
+    """
+    params.extend([item_id, user_id])
+
+    async with get_connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(sql, params)
+            row = await cur.fetchone()
+            await conn.commit()
+
+    if row is None:
+        logger.debug(
+            "wardrobe_service.update: item_id=%s not found for user_id=%s",
+            item_id,
+            user_id,
+        )
+        return None
+
+    rid, name_, cat, s3_key, tags_, created_at = row
+    logger.info(
+        "wardrobe_service.update: user_id=%s item_id=%s name=%r category=%s",
+        user_id,
+        rid,
+        name_,
+        cat,
+    )
+    return {
+        "item_id": str(rid),
+        "name": name_,
+        "category": cat,
+        "image_s3_key": s3_key,
+        "tags": list(tags_) if tags_ else [],
+        "created_at": created_at,
+    }

@@ -33,6 +33,7 @@ from app.services import user_service
 from app.core import auth
 from app.models.user import UserCreate, User, Token
 from app.models.product import ProductRecommendation
+from app.models.wardrobe import WardrobeItemUpdate
 from app.services import db_service
 
 logger = logging.getLogger(__name__)
@@ -796,6 +797,49 @@ async def delete_wardrobe_item(
             status_code=status.HTTP_404_NOT_FOUND, detail="Wardrobe item not found"
         )
     logger.info("DELETE /wardrobe/%s: deleted by user_id=%s", item_id, user_id)
+
+
+@app.put("/wardrobe/{item_id}")
+async def update_wardrobe_item_endpoint(
+    item_id: str,
+    body: WardrobeItemUpdate,
+    user_id: str = Depends(auth.get_current_user_id),
+) -> dict:
+    """
+    Update name, category, and/or tags on a wardrobe item.
+
+    All fields are optional — only provided fields are changed (PATCH semantics
+    via PUT).  Ownership is enforced: 404 when the item doesn't exist or belongs
+    to a different user.
+    """
+    from app.services import wardrobe_service
+    from app.services.storage_service import get_image_presigned_url
+    from app.models.wardrobe import WardrobeItemResponse
+
+    item = await wardrobe_service.update_wardrobe_item(
+        user_id=user_id,
+        item_id=item_id,
+        name=body.name,
+        category=body.category,
+        tags=body.tags,
+    )
+    if item is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Wardrobe item not found"
+        )
+
+    image_url = (
+        get_image_presigned_url(item["image_s3_key"]) if item["image_s3_key"] else None
+    )
+    logger.info("PUT /wardrobe/%s: updated by user_id=%s", item_id, user_id)
+    return WardrobeItemResponse(
+        item_id=item["item_id"],
+        name=item["name"],
+        category=item["category"],
+        image_url=image_url,
+        tags=item["tags"],
+        created_at=item["created_at"],
+    ).model_dump()
 
 
 # --- Interaction Logging Endpoints ---

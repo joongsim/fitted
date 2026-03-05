@@ -15,6 +15,14 @@ class WardrobeItemCreate(BaseModel):
     )
 
 
+class WardrobeItemUpdate(BaseModel):
+    """Request body for updating wardrobe item metadata (all fields optional)."""
+
+    name: Optional[str] = None
+    category: Optional[str] = None
+    tags: Optional[list[str]] = None
+
+
 class WardrobeItemResponse(BaseModel):
     """JSON-serialisable representation of a wardrobe item returned by the API."""
 

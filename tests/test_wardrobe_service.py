@@ -256,3 +256,68 @@ class TestDeleteWardrobeItem:
         # Both item_id and user_id must appear — ownership check
         assert str(_ITEM_ID) in params
         assert _USER_ID in params
+
+
+# ---------------------------------------------------------------------------
+# update_wardrobe_item
+# ---------------------------------------------------------------------------
+
+
+class TestUpdateWardrobeItem:
+    @pytest.mark.asyncio
+    async def test_returns_updated_dict(self):
+        row = (_ITEM_ID, "Updated Blazer", "tops", "s3/key.jpg", ["blue"], _NOW)
+        mock_conn, _ = _make_mock_conn(fetchone_return=row)
+
+        with patch(_PATCH_CONN, return_value=_mock_get_connection(mock_conn)):
+            result = await wardrobe_service.update_wardrobe_item(
+                user_id=_USER_ID,
+                item_id=str(_ITEM_ID),
+                name="Updated Blazer",
+                category="tops",
+                tags=["blue"],
+            )
+
+        assert result is not None
+        assert result["name"] == "Updated Blazer"
+        assert result["category"] == "tops"
+        assert result["tags"] == ["blue"]
+
+    @pytest.mark.asyncio
+    async def test_returns_none_when_not_found(self):
+        mock_conn, _ = _make_mock_conn(fetchone_return=None)
+
+        with patch(_PATCH_CONN, return_value=_mock_get_connection(mock_conn)):
+            result = await wardrobe_service.update_wardrobe_item(
+                user_id=_USER_ID,
+                item_id="nonexistent",
+                name="X",
+            )
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_commits_transaction(self):
+        row = (_ITEM_ID, "Blazer", "outerwear", None, [], _NOW)
+        mock_conn, _ = _make_mock_conn(fetchone_return=row)
+
+        with patch(_PATCH_CONN, return_value=_mock_get_connection(mock_conn)):
+            await wardrobe_service.update_wardrobe_item(
+                user_id=_USER_ID, item_id=str(_ITEM_ID), name="Blazer"
+            )
+
+        mock_conn.commit.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_where_clause_includes_user_id(self):
+        mock_conn, mock_cur = _make_mock_conn(fetchone_return=None)
+
+        with patch(_PATCH_CONN, return_value=_mock_get_connection(mock_conn)):
+            await wardrobe_service.update_wardrobe_item(
+                user_id=_USER_ID, item_id=str(_ITEM_ID), name="X"
+            )
+
+        mock_cur.execute.assert_awaited_once()
+        params = mock_cur.execute.call_args[0][1]
+        assert str(_ITEM_ID) in params
+        assert _USER_ID in params
