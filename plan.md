@@ -285,8 +285,9 @@ Pydantic validation, forecast support, FastHTML frontend, S3-backed caching.
 - [x] `scripts/backfill_wardrobe_embeddings.py` — idempotent batch backfill; 10 tests passing
 - [x] Wire `POST /recommend-products` into frontend — `/recommendations` page + `POST /get-recommendations` HTMX endpoint; `product_card` grid; 40 frontend tests passing
 
-### Week 8 — Training Pipeline
-- [x] `scripts/train_two_towers.py` — interactions → triplets → `TripletMarginLoss(margin=0.2)` → `s3://fitted/models/two-towers/latest.pt`; MLflow experiment tracking; `--epochs`, `--lr`, `--margin`, `--dry-run` flags
+### ✅ Week 8 — Training Pipeline
+- [x] `scripts/train_two_towers.py` — interactions → triplets → `TripletMarginLoss(margin=0.2)` → `s3://fitted/models/two-towers/latest.pt`; MLflow experiment tracking; `--epochs`, `--lr`, `--margin`, `--dry-run` flags; 20 tests passing
+- [x] `scripts/pretrain_item_tower.py` — MSE reconstruction pre-training on catalog CLIP embeddings; warm start before interaction data; preserves existing UserTower on S3; cosine LR schedule; 11 tests passing
 
 ### Weeks 13–16 — Affiliate Monetization
 - [ ] Affiliate network integrations: Amazon Associates, ShopStyle, Rakuten

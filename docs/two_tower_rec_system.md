@@ -2979,6 +2979,8 @@ def test_encode_image_returns_512_dim_unit_vector():
 | `scripts/backfill_wardrobe_embeddings.py` | Backfill `wardrobe_items.embedding` from S3 images |
 | `scripts/train_two_towers.py` | Train UserTower + ItemTower on interaction triplets; MLflow logging; upload weights to S3 |
 | `tests/test_train_two_towers.py` | 20 tests — data loading, triplet construction, training shapes, S3 upload round-trip |
+| `scripts/pretrain_item_tower.py` | Pre-train ItemTower with MSE reconstruction on catalog CLIP embeddings; preserves existing UserTower; cosine LR schedule |
+| `tests/test_pretrain_item_tower.py` | 11 tests — embedding loading, training shape, S3 upload with UserTower preservation |
 
 ---
 
@@ -3089,3 +3091,4 @@ The following sections were added after the initial implementation draft:
   - **Section 20**: Frontend surfaces — wardrobe gallery + upload form, style preferences form, product cards with save/dismiss buttons, nav bar updates
 - **Section 21**: Image embedding — `encode_image(url_or_s3_key)` CLIP image encoder, post-upload `asyncio.create_task` trigger, `backfill_wardrobe_embeddings.py`
 - **Section 22**: Training pipeline — `scripts/train_two_towers.py`; interaction → triplet construction; `TripletMarginWithDistanceLoss`; S3 weight upload; MLflow run logging
+- **Section 22 (pretrain)**: `scripts/pretrain_item_tower.py` — MSE reconstruction pre-training on catalog embeddings; cosine LR schedule; UserTower preservation during upload
