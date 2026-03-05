@@ -93,8 +93,18 @@ class Config:
 
     @property
     def database_url(self) -> str:
-        """Get PostgreSQL connection URL."""
-        return self.get_parameter("/fitted/database-url")
+        """
+        Get PostgreSQL connection URL.
+
+        Normalises the value so it always starts with ``postgresql://``.
+        This guards against SSM parameters stored without the scheme prefix
+        (e.g. ``fitted_admin:pass@host:5432/db`` instead of the full URL),
+        which causes psycopg to misparse the username as a hostname.
+        """
+        url = self.get_parameter("/fitted/database-url")
+        if url and not url.startswith(("postgresql://", "postgres://")):
+            url = "postgresql://" + url
+        return url
 
     @property
     def weather_bucket_name(self) -> Optional[str]:
