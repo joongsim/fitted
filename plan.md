@@ -1,6 +1,6 @@
 # Fitted — Engineering Plan
 
-**Status:** Week 7 complete — image embedding + frontend recommendation flow pending
+**Status:** Image embedding + frontend recommendations complete — Week 8 training pipeline next
 **Stack:** FastHTML on EC2 · FastAPI on Lambda · PostgreSQL + pgvector on RDS · S3 · CLIP ViT-B/32
 
 ---
@@ -232,8 +232,8 @@ Pydantic validation, forecast support, FastHTML frontend, S3-backed caching.
 
 **5A — CLIP Embedding Service**
 - [x] `app/services/embedding_service.py` — CLIP ViT-B/32 text encoder; lazy-import singleton; `encode_text(text) -> np.ndarray` (512-dim L2-normalized); `reset_model_for_testing()`
-- [ ] `encode_image(url_or_s3_key)` — CLIP ViT-B/32 image encoder path; runs on EC2 sidecar (Lambda 250MB limit); triggered after wardrobe upload to populate `wardrobe_items.embedding`
-- [ ] `scripts/backfill_wardrobe_embeddings.py` — backfill `wardrobe_items.embedding` for existing photos; fetches from S3, encodes with CLIP image encoder; run via SSH tunnel
+- [x] `encode_image(url_or_s3_key)` — CLIP ViT-B/32 image encoder path; runs on EC2 sidecar (Lambda 250MB limit); triggered after wardrobe upload to populate `wardrobe_items.embedding`
+- [x] `scripts/backfill_wardrobe_embeddings.py` — backfill `wardrobe_items.embedding` for existing photos; fetches from S3, encodes with CLIP image encoder; run via SSH tunnel
 
 **5A.5 — Domain Protocol**
 - [x] `app/services/domain.py` — `@runtime_checkable` `Domain` Protocol with `encode_query`, `encode_item`, `parse_item`, `preference_context`
@@ -278,19 +278,13 @@ Pydantic validation, forecast support, FastHTML frontend, S3-backed caching.
 - [x] Frontend auth: login/register pages, session management, JWT cookie
 - [x] Frontend wardrobe: upload form, gallery grid, HTMX delete
 
-**Pending**
-- [ ] Wire `POST /recommend-products` into frontend — "Get Recommendations" flow; render `product_card` grid from API response
+### ✅ Image Embedding — Wardrobe Photo Encoding
 
-### Image Embedding — Wardrobe Photo Encoding
-
-Currently `wardrobe_items.embedding` is always NULL — the user tower falls back to cold-start style tag encoding. Image embedding closes that gap: wardrobe photos are encoded with CLIP's image encoder and stored, so the user vector reflects actual visual taste rather than stated preferences.
-
-- [ ] `encode_image(url_or_s3_key: str) -> np.ndarray` in `embedding_service.py` — CLIP ViT-B/32 image encoder; downloads image from URL or S3 key; preprocesses with CLIP's `transform` pipeline; returns 512-dim L2-normalized float32 ndarray; runs only on EC2 (not Lambda)
-- [ ] Post-upload embedding trigger in `POST /wardrobe` — after inserting the wardrobe row, call `encode_image(image_s3_key)` and `UPDATE wardrobe_items SET embedding = %s WHERE item_id = %s`; fire-and-forget via `asyncio.create_task` so it doesn't block the 201 response
-- [ ] `scripts/backfill_wardrobe_embeddings.py` — idempotent batch script; fetches all `wardrobe_items` where `embedding IS NULL AND image_s3_key IS NOT NULL`; encodes via CLIP image encoder; writes back in batches of 50; run via SSH tunnel
-- [ ] Tests: mock CLIP image transform + model in `test_embedding_service.py`; test `encode_image` returns unit vector with correct shape
-
-> **Deployment note:** `encode_image` is imported only inside the `POST /wardrobe` endpoint handler (lazy import), keeping the Lambda package size below 250MB. The actual CLIP image encoder weights (~290MB) are only present on the EC2 instance.
+- [x] `encode_image(url_or_s3_key: str) -> np.ndarray` in `embedding_service.py` — CLIP ViT-B/32 image encoder; downloads image from URL or S3 key; returns 512-dim L2-normalized float32 ndarray
+- [x] Post-upload embedding trigger in `POST /wardrobe` — fire-and-forget via `asyncio.create_task`
+- [x] `scripts/backfill_wardrobe_embeddings.py` — idempotent batch script
+- [x] Tests: 10/10 passing
+- [x] Wire `POST /recommend-products` into frontend — `/recommendations` page + `POST /get-recommendations` HTMX endpoint; `product_card` grid; nav "Recs" link; shop button on outfit page; 40/40 frontend tests
 
 ### Week 8 — Training Pipeline
 - [ ] `scripts/train_two_towers.py` — interactions → triplets → `TripletMarginLoss(margin=0.2)` → `s3://fitted/models/two-towers/latest.pt`
