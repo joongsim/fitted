@@ -2977,10 +2977,12 @@ def test_encode_image_returns_512_dim_unit_vector():
 | `tests/test_preference_reranker.py` | Bradley-Terry MM + rerank blending tests |
 | `app/services/embedding_service.py` | `encode_image(url_or_s3_key)` — CLIP image encoder for wardrobe photos |
 | `scripts/backfill_wardrobe_embeddings.py` | Backfill `wardrobe_items.embedding` from S3 images |
-| `scripts/train_two_towers.py` | Train UserTower + ItemTower on interaction triplets; MLflow logging; upload weights to S3 |
-| `tests/test_train_two_towers.py` | 20 tests — data loading, triplet construction, training shapes, S3 upload round-trip |
-| `scripts/pretrain_item_tower.py` | Pre-train ItemTower with MSE reconstruction on catalog CLIP embeddings; preserves existing UserTower; cosine LR schedule |
-| `tests/test_pretrain_item_tower.py` | 11 tests — embedding loading, training shape, S3 upload with UserTower preservation |
+| `scripts/train_two_towers.py` | Train UserTower + ItemTower on interaction triplets; MLflow; S3 upload |
+| `scripts/pretrain_item_tower.py` | Pre-train ItemTower with MSE reconstruction on catalog embeddings |
+| `app/services/affiliate_service.py` | Amazon/ShopStyle/Rakuten link rewriting; `affiliate_clicks` DB; `/r/{click_id}` redirect |
+| `tests/test_train_two_towers.py` | 20 tests — data loading, triplet construction, training, S3 upload |
+| `tests/test_pretrain_item_tower.py` | 11 tests — embedding loading, training, S3 upload with UserTower preservation |
+| `tests/test_affiliate_service.py` | 26 tests — URL rewriting, network detection, DB click tracking |
 
 ---
 
@@ -3075,6 +3077,76 @@ A cron job on EC2 running the script nightly (once users are active) is the simp
 
 ---
 
+## 23. Affiliate Monetization: Link Rewriting and Click Tracking
+
+### Motivation
+
+Product cards link to external marketplaces. Without affiliate tags, these are revenue-free referrals. The affiliate layer rewrites product URLs to include network-specific tracking parameters before they reach the browser, and logs every click server-side for attribution.
+
+Revenue model at 1K–10K users: $75–750/mo at 3% click-through, $100 AOV, 5% commission.
+
+### Architecture
+
+```
+POST /recommend-products
+    → rewrite_to_affiliate_url(product_url)   # Amazon | ShopStyle | Rakuten
+    → record_affiliate_click(user, item, urls) → click_id (UUID)
+    → response: { recommendations: [..., click_url: "/r/{click_id}"] }
+
+User clicks product card
+    → GET /r/{click_id}
+    → resolve_and_record_click(click_id)       # marks clicked_at
+    → 302 → affiliate_url
+```
+
+Product URLs are never sent to the browser with affiliate params embedded — this prevents adblockers from stripping them. The `/r/{click_id}` redirect is the only URL the browser sees.
+
+### URL rewriting
+
+**Amazon Associates** — appends `?tag=<affiliate_tag>` to `/dp/<ASIN>` product pages. Replaces existing `tag=` param if present. Only rewrites ASIN-pattern URLs; search pages are left unchanged.
+
+**ShopStyle Collective** — appends `?pid=<publisher_id>&uid=<uuid>` to `shopstyle.com` URLs. The `uid` is a fresh UUID per click (ShopStyle uses it for deduplication).
+
+**Rakuten** — wraps any merchant URL in a `click.linksynergy.com/deeplink?id=<site_id>&mid=<mid>&murl=<encoded>` redirect. Requires a per-merchant `mid` configured via `RAKUTEN_MID` env var.
+
+All rewriters return `None` if the URL doesn't match their domain, enabling graceful fallthrough to the original URL.
+
+### Configuration
+
+All affiliate credentials are optional env vars. If unset, the corresponding network is disabled and the original URL passes through unchanged:
+
+| Env var | Network | Example value |
+|---|---|---|
+| `AMAZON_AFFILIATE_TAG` | Amazon Associates | `fitted-20` |
+| `SHOPSTYLE_PUBLISHER_ID` | ShopStyle Collective | `12345` |
+| `RAKUTEN_SITE_ID` | Rakuten | `987654` |
+| `RAKUTEN_MID` | Rakuten (per merchant) | `38723` |
+
+### Database
+
+The `affiliate_clicks` table stores pre-click state (affiliate URL resolved at recommendation time) and post-click state (`clicked_at` set on redirect):
+
+```sql
+CREATE TABLE affiliate_clicks (
+    click_id      UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id       UUID REFERENCES users ON DELETE CASCADE,
+    item_id       TEXT REFERENCES catalog_items,
+    original_url  TEXT NOT NULL,
+    affiliate_url TEXT NOT NULL,
+    network       VARCHAR NOT NULL DEFAULT 'none',
+    created_at    TIMESTAMPTZ DEFAULT NOW(),
+    clicked_at    TIMESTAMPTZ   -- NULL until redirect fires
+);
+```
+
+This gives you: click-through rate (CTR) = rows where `clicked_at IS NOT NULL` / total, broken down by network, item, user cohort, or time window.
+| `scripts/train_two_towers.py` | Train UserTower + ItemTower on interaction triplets; MLflow logging; upload weights to S3 |
+| `tests/test_train_two_towers.py` | 20 tests — data loading, triplet construction, training shapes, S3 upload round-trip |
+| `scripts/pretrain_item_tower.py` | Pre-train ItemTower with MSE reconstruction on catalog CLIP embeddings; preserves existing UserTower; cosine LR schedule |
+| `tests/test_pretrain_item_tower.py` | 11 tests — embedding loading, training shape, S3 upload with UserTower preservation |
+
+---
+
 ## Document History
 
 The following sections were added after the initial implementation draft:
@@ -3092,3 +3164,4 @@ The following sections were added after the initial implementation draft:
 - **Section 21**: Image embedding — `encode_image(url_or_s3_key)` CLIP image encoder, post-upload `asyncio.create_task` trigger, `backfill_wardrobe_embeddings.py`
 - **Section 22**: Training pipeline — `scripts/train_two_towers.py`; interaction → triplet construction; `TripletMarginWithDistanceLoss`; S3 weight upload; MLflow run logging
 - **Section 22 (pretrain)**: `scripts/pretrain_item_tower.py` — MSE reconstruction pre-training on catalog embeddings; cosine LR schedule; UserTower preservation during upload
+- **Section 23**: Affiliate monetization — `affiliate_service.py` URL rewriting (Amazon/ShopStyle/Rakuten), `affiliate_clicks` table, `GET /r/{click_id}` redirect, integration in `POST /recommend-products`

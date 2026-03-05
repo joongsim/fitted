@@ -1,6 +1,6 @@
 # Fitted — Engineering Plan
 
-**Status:** Image embedding + frontend recommendations complete — Week 8 training pipeline next
+**Status:** Week 8 training pipeline + affiliate monetization Phase 1 complete
 **Stack:** FastHTML on EC2 · FastAPI on Lambda · PostgreSQL + pgvector on RDS · S3 · CLIP ViT-B/32
 
 ---
@@ -290,11 +290,14 @@ Pydantic validation, forecast support, FastHTML frontend, S3-backed caching.
 - [ ] `scripts/train_two_towers.py` — interactions → triplets → `TripletMarginLoss(margin=0.2)` → `s3://fitted/models/two-towers/latest.pt`
 - [ ] MLflow experiment tracking
 
-### Weeks 13–16 — Affiliate Monetization
-- [ ] Affiliate network integrations: Amazon Associates, ShopStyle, Rakuten
-- [ ] Click-through tracking on `user_interactions`
-- [ ] Conversion webhook listeners
+### ✅ Weeks 13–16 — Affiliate Monetization (Phase 1)
+- [x] `app/services/affiliate_service.py` — Amazon Associates, ShopStyle Collective, Rakuten link rewriting; `rewrite_to_affiliate_url`, `record_affiliate_click`, `resolve_and_record_click`, `detect_network`; config-driven (env vars, disabled by default)
+- [x] `GET /r/{click_id}` — server-side tracked redirect; marks `affiliate_clicks.clicked_at`; falls back to stored URL on re-click
+- [x] `affiliate_clicks` table in `db_migrate.py` — click_id, user_id, item_id, original_url, affiliate_url, network, created_at, clicked_at; HNSW + sparse indexes
+- [x] Integration in `POST /recommend-products` — each recommendation gets a `click_url = /r/{click_id}` with pre-written affiliate URL stored server-side
+- [x] `tests/test_affiliate_service.py` — 26 tests passing
 - [ ] A/B test product card presentation
+- [ ] Conversion webhook listeners (future phase)
 
 ---
 
