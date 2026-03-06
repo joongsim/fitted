@@ -1025,6 +1025,143 @@ class TestRecommendProducts:
 
 
 # ---------------------------------------------------------------------------
+# POST /interactions
+# ---------------------------------------------------------------------------
+
+
+class TestLogInteraction:
+    def _db_patch(self, mock_conn):
+        from contextlib import asynccontextmanager
+
+        @asynccontextmanager
+        async def _fake_get_connection():
+            yield mock_conn
+
+        return patch(
+            "app.main.db_service.get_connection", side_effect=_fake_get_connection
+        )
+
+    def test_click_returns_201_and_logged(self, client):
+        mock_conn, _ = _make_mock_db_conn()
+        with self._db_patch(mock_conn):
+            response = client.post(
+                "/interactions",
+                json={
+                    "item_id": "item123",
+                    "interaction_type": "click",
+                    "weather_context": {"temp_c": 20, "condition": "Sunny"},
+                    "query_text": "blue shirt",
+                },
+                headers=_auth_headers(),
+            )
+        assert response.status_code == 201
+        assert response.json() == {"status": "logged"}
+
+    def test_save_returns_201(self, client):
+        mock_conn, _ = _make_mock_db_conn()
+        with self._db_patch(mock_conn):
+            response = client.post(
+                "/interactions",
+                json={"item_id": "item123", "interaction_type": "save"},
+                headers=_auth_headers(),
+            )
+        assert response.status_code == 201
+
+    def test_dismiss_returns_201(self, client):
+        mock_conn, _ = _make_mock_db_conn()
+        with self._db_patch(mock_conn):
+            response = client.post(
+                "/interactions",
+                json={"item_id": "item123", "interaction_type": "dismiss"},
+                headers=_auth_headers(),
+            )
+        assert response.status_code == 201
+
+    def test_no_auth_returns_401(self, client):
+        with patch.dict(os.environ, {"DEV_MODE": "false"}):
+            response = client.post(
+                "/interactions",
+                json={"item_id": "item123", "interaction_type": "click"},
+            )
+        assert response.status_code == 401
+
+    def test_invalid_interaction_type_returns_422(self, client):
+        response = client.post(
+            "/interactions",
+            json={"item_id": "item123", "interaction_type": "like"},
+            headers=_auth_headers(),
+        )
+        assert response.status_code == 422
+        assert "interaction_type" in response.json()["detail"].lower()
+
+    def test_missing_item_id_returns_422(self, client):
+        response = client.post(
+            "/interactions",
+            json={"interaction_type": "click"},
+            headers=_auth_headers(),
+        )
+        assert response.status_code == 422
+
+    def test_missing_interaction_type_returns_422(self, client):
+        response = client.post(
+            "/interactions",
+            json={"item_id": "item123"},
+            headers=_auth_headers(),
+        )
+        assert response.status_code == 422
+
+    def test_weather_context_defaults_to_empty_dict(self, client):
+        mock_conn, _ = _make_mock_db_conn()
+        with self._db_patch(mock_conn):
+            response = client.post(
+                "/interactions",
+                json={"item_id": "item123", "interaction_type": "click"},
+                headers=_auth_headers(),
+            )
+        assert response.status_code == 201
+
+    def test_query_text_is_optional(self, client):
+        mock_conn, _ = _make_mock_db_conn()
+        with self._db_patch(mock_conn):
+            response = client.post(
+                "/interactions",
+                json={
+                    "item_id": "item123",
+                    "interaction_type": "click",
+                    "query_text": None,
+                },
+                headers=_auth_headers(),
+            )
+        assert response.status_code == 201
+
+    def test_db_insert_called_with_correct_args(self, client):
+        mock_conn, mock_cur = _make_mock_db_conn()
+        with self._db_patch(mock_conn):
+            client.post(
+                "/interactions",
+                json={"item_id": "item123", "interaction_type": "click"},
+                headers=_auth_headers(MOCK_USER_ID),
+            )
+        mock_cur.execute.assert_awaited_once()
+        sql, params = mock_cur.execute.call_args.args
+        assert "user_interactions" in sql
+        assert params[0] == MOCK_USER_ID
+        assert params[1] == "item123"
+        assert params[2] == "click"
+
+    def test_db_error_returns_500(self, client):
+        mock_conn, mock_cur = _make_mock_db_conn()
+        mock_cur.execute = AsyncMock(side_effect=RuntimeError("db down"))
+        with self._db_patch(mock_conn):
+            response = client.post(
+                "/interactions",
+                json={"item_id": "item123", "interaction_type": "click"},
+                headers=_auth_headers(),
+            )
+        assert response.status_code == 500
+
+
+# ---------------------------------------------------------------------------
 # POST /preferences/pairs
 # ---------------------------------------------------------------------------
 
