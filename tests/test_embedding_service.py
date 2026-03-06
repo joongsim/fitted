@@ -327,3 +327,28 @@ def test_encode_image_url_is_l2_normalized():
         result = encode_image("https://example.com/pants.jpg")
 
     assert abs(np.linalg.norm(result) - 1.0) < 1e-5
+
+
+def test_encode_image_s3_key_sends_bytes_to_remote():
+    """When EMBEDDING_SERVICE_URL is set and an S3 key is given, encode_image fetches from S3 and POSTs bytes."""
+    fake_embedding = [0.5] * 512
+    mock_httpx_response = MagicMock()
+    mock_httpx_response.json.return_value = {"embedding": fake_embedding}
+    mock_httpx_response.raise_for_status = MagicMock()
+    fake_jpeg = b"\xff\xd8\xff" + b"\x00" * 100
+
+    mock_s3_client = MagicMock()
+    mock_body = MagicMock()
+    mock_body.read.return_value = fake_jpeg
+    mock_s3_client.get_object.return_value = {"Body": mock_body}
+
+    with patch.dict(os.environ, {"EMBEDDING_SERVICE_URL": "http://localhost:8001"}):
+        with patch("boto3.client", return_value=mock_s3_client):
+            with patch("httpx.post", return_value=mock_httpx_response) as mock_post:
+                result = embedding_service.encode_image("wardrobe-images/user/item.jpg")
+
+    mock_s3_client.get_object.assert_called_once()
+    mock_post.assert_called_once()
+    assert "/embed/image" in mock_post.call_args.args[0]
+    assert result.shape == (512,)
+    assert result.dtype == np.float32

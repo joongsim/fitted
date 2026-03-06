@@ -98,10 +98,9 @@ def encode_image(url_or_s3_key: str) -> np.ndarray:
             image_bytes = response.content
         else:
             import boto3
-            import os as _os
 
             s3 = boto3.client("s3")
-            bucket = _os.environ.get("S3_BUCKET", "fitted-wardrobe-images")
+            bucket = os.environ.get("S3_BUCKET", "fitted-wardrobe-images")
             obj = s3.get_object(Bucket=bucket, Key=url_or_s3_key)
             image_bytes = obj["Body"].read()
         return _remote_encode_image(image_bytes)
@@ -123,8 +122,6 @@ def encode_image(url_or_s3_key: str) -> np.ndarray:
 
         logger.debug("encode_image: fetching S3 key %s", url_or_s3_key)
         s3 = boto3.client("s3")
-        import os
-
         bucket = os.environ.get("S3_BUCKET", "fitted-wardrobe-images")
         obj = s3.get_object(Bucket=bucket, Key=url_or_s3_key)
         image_bytes = obj["Body"].read()
@@ -155,8 +152,24 @@ def reset_model_for_testing() -> None:
 
 
 def _remote_url() -> str | None:
-    """Return the remote embedding server base URL, or None if not configured."""
-    return os.environ.get("EMBEDDING_SERVICE_URL")
+    """Return the remote embedding server base URL, or None if not configured.
+
+    Raises ValueError at call time if the URL targets a disallowed host (e.g.,
+    EC2 instance metadata endpoint) to prevent SSRF.
+    """
+    import urllib.parse
+
+    url = os.environ.get("EMBEDDING_SERVICE_URL")
+    if url is None:
+        return None
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(f"EMBEDDING_SERVICE_URL must use http or https, got: {url!r}")
+    if parsed.hostname in ("169.254.169.254", "fd00:ec2::254"):
+        raise ValueError(
+            "EMBEDDING_SERVICE_URL must not target the EC2 instance metadata endpoint"
+        )
+    return url
 
 
 def _remote_encode_text(text: str) -> np.ndarray:
@@ -167,6 +180,10 @@ def _remote_encode_text(text: str) -> np.ndarray:
     resp = httpx.post(f"{url}/embed/text", json={"text": text}, timeout=30.0)
     resp.raise_for_status()
     embedding = np.array(resp.json()["embedding"], dtype=np.float32)
+    if embedding.shape != (512,):
+        raise ValueError(
+            f"Remote embedding server returned unexpected shape {embedding.shape}; expected (512,)"
+        )
     logger.debug(
         "_remote_encode_text: %r -> shape %s (remote)", text[:80], embedding.shape
     )
@@ -185,6 +202,10 @@ def _remote_encode_image(image_bytes: bytes) -> np.ndarray:
     )
     resp.raise_for_status()
     embedding = np.array(resp.json()["embedding"], dtype=np.float32)
+    if embedding.shape != (512,):
+        raise ValueError(
+            f"Remote embedding server returned unexpected shape {embedding.shape}; expected (512,)"
+        )
     logger.debug(
         "_remote_encode_image: %d bytes -> shape %s (remote)",
         len(image_bytes),
