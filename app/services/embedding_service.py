@@ -2,6 +2,7 @@
 
 import io
 import logging
+import os
 
 import numpy as np
 
@@ -48,6 +49,9 @@ def encode_text(text: str) -> np.ndarray:
     Returns:
         np.ndarray of shape (512,), dtype float32, unit norm.
     """
+    if _remote_url():
+        return _remote_encode_text(text)
+
     import torch
 
     model, tokenizer, _ = _load_model_and_transform()
@@ -84,6 +88,24 @@ def encode_image(url_or_s3_key: str) -> np.ndarray:
     Returns:
         np.ndarray of shape (512,), dtype float32, unit norm.
     """
+    if _remote_url():
+        # Fetch image bytes on EC2 (AWS creds stay server-side), send only bytes to remote
+        if url_or_s3_key.startswith("http"):
+            import requests
+
+            response = requests.get(url_or_s3_key, timeout=10)
+            response.raise_for_status()
+            image_bytes = response.content
+        else:
+            import boto3
+            import os as _os
+
+            s3 = boto3.client("s3")
+            bucket = _os.environ.get("S3_BUCKET", "fitted-wardrobe-images")
+            obj = s3.get_object(Bucket=bucket, Key=url_or_s3_key)
+            image_bytes = obj["Body"].read()
+        return _remote_encode_image(image_bytes)
+
     import torch
     from PIL import Image
 
@@ -130,3 +152,42 @@ def reset_model_for_testing() -> None:
     _model = None
     _tokenizer = None
     _transform = None
+
+
+def _remote_url() -> str | None:
+    """Return the remote embedding server base URL, or None if not configured."""
+    return os.environ.get("EMBEDDING_SERVICE_URL")
+
+
+def _remote_encode_text(text: str) -> np.ndarray:
+    """POST text to the remote embedding server and return a 512-dim float32 ndarray."""
+    import httpx
+
+    url = _remote_url()
+    resp = httpx.post(f"{url}/embed/text", json={"text": text}, timeout=30.0)
+    resp.raise_for_status()
+    embedding = np.array(resp.json()["embedding"], dtype=np.float32)
+    logger.debug(
+        "_remote_encode_text: %r -> shape %s (remote)", text[:80], embedding.shape
+    )
+    return embedding
+
+
+def _remote_encode_image(image_bytes: bytes) -> np.ndarray:
+    """POST raw image bytes to the remote embedding server and return a 512-dim float32 ndarray."""
+    import httpx
+
+    url = _remote_url()
+    resp = httpx.post(
+        f"{url}/embed/image",
+        files={"file": ("image.jpg", image_bytes, "image/jpeg")},
+        timeout=30.0,
+    )
+    resp.raise_for_status()
+    embedding = np.array(resp.json()["embedding"], dtype=np.float32)
+    logger.debug(
+        "_remote_encode_image: %d bytes -> shape %s (remote)",
+        len(image_bytes),
+        embedding.shape,
+    )
+    return embedding

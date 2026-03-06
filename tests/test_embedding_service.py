@@ -5,12 +5,14 @@ or loaded in CI.
 """
 
 import io
+import os
 import numpy as np
 import pytest
 import torch
 from unittest.mock import MagicMock, patch
 
 from app.services.embedding_service import reset_model_for_testing
+from app.services import embedding_service
 
 
 @pytest.fixture(autouse=True)
@@ -84,6 +86,68 @@ def test_encode_text_l2_normalizes_output():
         result = encode_text("any text")
 
     assert abs(np.linalg.norm(result) - 1.0) < 1e-5
+
+
+# ---------------------------------------------------------------------------
+# Remote embedding client path
+# ---------------------------------------------------------------------------
+
+
+def test_encode_text_uses_remote_when_env_var_set():
+    """When EMBEDDING_SERVICE_URL is set, encode_text should POST to the remote server."""
+    fake_embedding = [0.1] * 512
+    mock_response = MagicMock()
+    mock_response.json.return_value = {"embedding": fake_embedding}
+    mock_response.raise_for_status = MagicMock()
+
+    with patch.dict(os.environ, {"EMBEDDING_SERVICE_URL": "http://localhost:8001"}):
+        with patch("httpx.post", return_value=mock_response) as mock_post:
+            result = embedding_service.encode_text("blue shirt")
+
+    mock_post.assert_called_once()
+    call_args = mock_post.call_args
+    assert "/embed/text" in call_args.args[0]
+    assert result.shape == (512,)
+    assert result.dtype == np.float32
+
+
+def test_encode_text_uses_local_when_env_var_absent():
+    """When EMBEDDING_SERVICE_URL is not set, encode_text should use local CLIP."""
+    env = {k: v for k, v in os.environ.items() if k != "EMBEDDING_SERVICE_URL"}
+    with patch.dict(os.environ, env, clear=True):
+        with patch(
+            "app.services.embedding_service._load_model_and_transform",
+            return_value=(_make_mock_model(), _make_mock_tokenizer(), MagicMock()),
+        ) as mock_load:
+            from app.services.embedding_service import encode_text
+
+            encode_text("test")
+        mock_load.assert_called_once()
+
+
+def test_encode_image_sends_bytes_to_remote():
+    """When EMBEDDING_SERVICE_URL is set, encode_image fetches bytes locally and POSTs them."""
+    fake_embedding = [0.5] * 512
+    mock_httpx_response = MagicMock()
+    mock_httpx_response.json.return_value = {"embedding": fake_embedding}
+    mock_httpx_response.raise_for_status = MagicMock()
+
+    fake_jpeg = b"\xff\xd8\xff" + b"\x00" * 100
+
+    mock_requests_response = MagicMock()
+    mock_requests_response.content = fake_jpeg
+    mock_requests_response.raise_for_status = MagicMock()
+
+    with patch.dict(os.environ, {"EMBEDDING_SERVICE_URL": "http://localhost:8001"}):
+        with patch("requests.get", return_value=mock_requests_response):
+            with patch("httpx.post", return_value=mock_httpx_response) as mock_post:
+                result = embedding_service.encode_image("https://example.com/img.jpg")
+
+    mock_post.assert_called_once()
+    call_args = mock_post.call_args
+    assert "/embed/image" in call_args.args[0]
+    assert result.shape == (512,)
+    assert result.dtype == np.float32
 
 
 def test_encode_text_returns_float32():
@@ -195,10 +259,13 @@ def test_encode_image_url_returns_512_dim_unit_vector():
     mock_response.content = fake_jpeg
     mock_response.raise_for_status = MagicMock()
 
-    with patch(
-        "app.services.embedding_service._load_model_and_transform",
-        return_value=(mock_model, _make_mock_tokenizer(), mock_transform),
-    ), patch("requests.get", return_value=mock_response):
+    with (
+        patch(
+            "app.services.embedding_service._load_model_and_transform",
+            return_value=(mock_model, _make_mock_tokenizer(), mock_transform),
+        ),
+        patch("requests.get", return_value=mock_response),
+    ):
         from app.services.embedding_service import encode_image
 
         result = encode_image("https://example.com/shirt.jpg")
@@ -219,10 +286,13 @@ def test_encode_image_s3_key_fetches_from_s3():
     mock_body.read.return_value = fake_jpeg
     mock_s3_client.get_object.return_value = {"Body": mock_body}
 
-    with patch(
-        "app.services.embedding_service._load_model_and_transform",
-        return_value=(mock_model, _make_mock_tokenizer(), mock_transform),
-    ), patch("boto3.client", return_value=mock_s3_client):
+    with (
+        patch(
+            "app.services.embedding_service._load_model_and_transform",
+            return_value=(mock_model, _make_mock_tokenizer(), mock_transform),
+        ),
+        patch("boto3.client", return_value=mock_s3_client),
+    ):
         from app.services.embedding_service import encode_image
 
         result = encode_image("wardrobe-images/user-123/item-456.jpg")
@@ -245,10 +315,13 @@ def test_encode_image_url_is_l2_normalized():
     mock_response.content = fake_jpeg
     mock_response.raise_for_status = MagicMock()
 
-    with patch(
-        "app.services.embedding_service._load_model_and_transform",
-        return_value=(mock_model, _make_mock_tokenizer(), mock_transform),
-    ), patch("requests.get", return_value=mock_response):
+    with (
+        patch(
+            "app.services.embedding_service._load_model_and_transform",
+            return_value=(mock_model, _make_mock_tokenizer(), mock_transform),
+        ),
+        patch("requests.get", return_value=mock_response),
+    ):
         from app.services.embedding_service import encode_image
 
         result = encode_image("https://example.com/pants.jpg")
