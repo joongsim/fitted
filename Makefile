@@ -1,5 +1,6 @@
 # Fitted — local dev helpers
 # Requires: SSH tunnel open (make tunnel) and venv active
+# To offload CLIP to local GPU: make embed-server  (then in separate terminal: make tunnel-embed)
 
 PYTHON := .venv/bin/python
 # Fetch DB URL from SSM at runtime and rewrite host to localhost (SSH tunnel)
@@ -9,9 +10,18 @@ RUN      := USE_SSM=true DATABASE_URL="$(DB_URL)" PYTHONPATH=. $(PYTHON)
 
 # ── Tunnel ────────────────────────────────────────────────────────────────────
 
-.PHONY: tunnel
+EC2_HOST ?= fitted
+
+.PHONY: tunnel tunnel-embed embed-server
+
 tunnel:
-	ssh fitted-db-tunnel -N
+	ssh $(EC2_HOST) -N -L 5432:localhost:5432
+
+tunnel-embed:
+	ssh -R 8001:localhost:8001 $(EC2_HOST)
+
+embed-server:
+	$(PYTHON) scripts/embedding_server.py $(ARGS)
 
 # ── ML scripts ────────────────────────────────────────────────────────────────
 
