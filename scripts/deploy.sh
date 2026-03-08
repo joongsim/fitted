@@ -16,7 +16,7 @@ if [[ "${_FITTED_UPDATED:-false}" != "true" ]]; then
     echo "📥 Pulling latest changes from $BRANCH..."
     git fetch origin
     git checkout "$BRANCH"
-    git pull origin "$BRANCH"
+    git reset --hard origin/"$BRANCH"
     exec env _FITTED_UPDATED=true bash "$0" "$@"
 fi
 
