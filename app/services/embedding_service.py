@@ -2,6 +2,7 @@
 
 import io
 import logging
+import os
 
 import numpy as np
 
@@ -48,6 +49,9 @@ def encode_text(text: str) -> np.ndarray:
     Returns:
         np.ndarray of shape (512,), dtype float32, unit norm.
     """
+    if _remote_url():
+        return _remote_encode_text(text)
+
     import torch
 
     model, tokenizer, _ = _load_model_and_transform()
@@ -84,6 +88,23 @@ def encode_image(url_or_s3_key: str) -> np.ndarray:
     Returns:
         np.ndarray of shape (512,), dtype float32, unit norm.
     """
+    if _remote_url():
+        # Fetch image bytes on EC2 (AWS creds stay server-side), send only bytes to remote
+        if url_or_s3_key.startswith("http"):
+            import requests
+
+            response = requests.get(url_or_s3_key, timeout=10)
+            response.raise_for_status()
+            image_bytes = response.content
+        else:
+            import boto3
+
+            s3 = boto3.client("s3")
+            bucket = os.environ.get("S3_BUCKET", "fitted-wardrobe-images")
+            obj = s3.get_object(Bucket=bucket, Key=url_or_s3_key)
+            image_bytes = obj["Body"].read()
+        return _remote_encode_image(image_bytes)
+
     import torch
     from PIL import Image
 
@@ -101,8 +122,6 @@ def encode_image(url_or_s3_key: str) -> np.ndarray:
 
         logger.debug("encode_image: fetching S3 key %s", url_or_s3_key)
         s3 = boto3.client("s3")
-        import os
-
         bucket = os.environ.get("S3_BUCKET", "fitted-wardrobe-images")
         obj = s3.get_object(Bucket=bucket, Key=url_or_s3_key)
         image_bytes = obj["Body"].read()
@@ -130,3 +149,66 @@ def reset_model_for_testing() -> None:
     _model = None
     _tokenizer = None
     _transform = None
+
+
+def _remote_url() -> str | None:
+    """Return the remote embedding server base URL, or None if not configured.
+
+    Raises ValueError at call time if the URL targets a disallowed host (e.g.,
+    EC2 instance metadata endpoint) to prevent SSRF.
+    """
+    import urllib.parse
+
+    url = os.environ.get("EMBEDDING_SERVICE_URL")
+    if url is None:
+        return None
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(f"EMBEDDING_SERVICE_URL must use http or https, got: {url!r}")
+    if parsed.hostname in ("169.254.169.254", "fd00:ec2::254"):
+        raise ValueError(
+            "EMBEDDING_SERVICE_URL must not target the EC2 instance metadata endpoint"
+        )
+    return url
+
+
+def _remote_encode_text(text: str) -> np.ndarray:
+    """POST text to the remote embedding server and return a 512-dim float32 ndarray."""
+    import httpx
+
+    url = _remote_url()
+    resp = httpx.post(f"{url}/embed/text", json={"text": text}, timeout=30.0)
+    resp.raise_for_status()
+    embedding = np.array(resp.json()["embedding"], dtype=np.float32)
+    if embedding.shape != (512,):
+        raise ValueError(
+            f"Remote embedding server returned unexpected shape {embedding.shape}; expected (512,)"
+        )
+    logger.debug(
+        "_remote_encode_text: %r -> shape %s (remote)", text[:80], embedding.shape
+    )
+    return embedding
+
+
+def _remote_encode_image(image_bytes: bytes) -> np.ndarray:
+    """POST raw image bytes to the remote embedding server and return a 512-dim float32 ndarray."""
+    import httpx
+
+    url = _remote_url()
+    resp = httpx.post(
+        f"{url}/embed/image",
+        files={"file": ("image.jpg", image_bytes, "image/jpeg")},
+        timeout=30.0,
+    )
+    resp.raise_for_status()
+    embedding = np.array(resp.json()["embedding"], dtype=np.float32)
+    if embedding.shape != (512,):
+        raise ValueError(
+            f"Remote embedding server returned unexpected shape {embedding.shape}; expected (512,)"
+        )
+    logger.debug(
+        "_remote_encode_image: %d bytes -> shape %s (remote)",
+        len(image_bytes),
+        embedding.shape,
+    )
+    return embedding

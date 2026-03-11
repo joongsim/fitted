@@ -13,6 +13,11 @@ RestartSec=10
 Environment="USE_SSM=true"
 Environment="AWS_DEFAULT_REGION=us-west-1"
 Environment="WEATHER_BUCKET_NAME=fitted-weather-data-fitted-wardrobe-dev-903558039846"
+# Uncomment to offload CLIP embeddings to a local GPU machine via SSH reverse tunnel.
+# 1. Start local server:  python scripts/embedding_server.py
+# 2. Open tunnel (local): ssh -R 8001:localhost:8001 ec2-user@<EC2_IP>
+# 3. Uncomment the line below and restart: sudo systemctl restart fitted-backend
+#Environment="EMBEDDING_SERVICE_URL=http://localhost:8001"
 
 [Install]
 WantedBy=multi-user.target
