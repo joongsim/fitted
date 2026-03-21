@@ -539,3 +539,48 @@ class TestResetPasswordEndpoint:
             "token": raw_token, "new_password": "short"
         })
         assert resp.status_code == 422
+
+
+# --- Frontend tests ---
+# These tests inspect source code (not live HTTP) to verify the routes exist.
+
+import inspect
+
+
+class TestFrontendPasswordResetPages:
+    def _get_frontend_source(self):
+        import os, sys
+        with patch.dict(os.environ, {"USE_SSM": "false", "API_BASE_URL": "http://localhost:8000"}):
+            if "frontend.app" in sys.modules:
+                del sys.modules["frontend.app"]
+            import frontend.app as frontend
+            return inspect.getsource(frontend)
+
+    def test_login_page_has_forgot_password_link(self):
+        """The login page source should contain a link to /forgot-password."""
+        source = self._get_frontend_source()
+        assert "/forgot-password" in source
+        assert "Forgot" in source
+
+    def test_forgot_password_get_route_exists(self):
+        """Source should define a GET /forgot-password route."""
+        source = self._get_frontend_source()
+        assert '"/forgot-password"' in source or "'/forgot-password'" in source
+        assert 'type="email"' in source or "type='email'" in source
+
+    def test_forgot_password_post_route_exists(self):
+        """Source should define a POST /forgot-password route that calls the API."""
+        source = self._get_frontend_source()
+        assert "/auth/forgot-password" in source
+
+    def test_reset_password_get_route_exists(self):
+        """Source should define a GET /reset-password route with a hidden token field."""
+        source = self._get_frontend_source()
+        assert "/reset-password" in source
+        assert 'type="hidden"' in source or "type='hidden'" in source
+        assert 'name="token"' in source or "name='token'" in source
+
+    def test_reset_password_post_route_calls_api(self):
+        """Source should define a POST /reset-password route that calls the backend."""
+        source = self._get_frontend_source()
+        assert "/auth/reset-password" in source
