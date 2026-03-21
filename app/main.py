@@ -237,7 +237,7 @@ async def reset_password(request: Request, response: Response, body: ResetPasswo
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Reset link is invalid or has expired.",
         )
-    logger.info("Password reset successful for user_id=%s", result["user_id"])
+    logger.info("Password reset successful")
     return {"message": "Password updated successfully."}
 
 
