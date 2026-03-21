@@ -86,13 +86,19 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 async def _unhandled_exception_handler(request: Request, exc: Exception):
     """Convert unhandled non-HTTP exceptions to 500. Re-delegate HTTP/validation errors."""
-    from fastapi.exception_handlers import http_exception_handler, request_validation_exception_handler
+    from fastapi.exception_handlers import (
+        http_exception_handler,
+        request_validation_exception_handler,
+    )
     from fastapi.exceptions import RequestValidationError
+
     if isinstance(exc, HTTPException):
         return await http_exception_handler(request, exc)
     if isinstance(exc, RequestValidationError):
         return await request_validation_exception_handler(request, exc)
-    logger.error("Unhandled exception on %s %s", request.method, request.url.path, exc_info=True)
+    logger.error(
+        "Unhandled exception on %s %s", request.method, request.url.path, exc_info=True
+    )
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={"detail": "Internal server error."},
@@ -210,7 +216,9 @@ async def logout(response: Response):
 
 @app.post("/auth/forgot-password")
 @limiter.limit("5/15minutes")
-async def forgot_password(request: Request, response: Response, body: ForgotPasswordRequest):
+async def forgot_password(
+    request: Request, response: Response, body: ForgotPasswordRequest
+):
     """
     Request a password reset email. Always returns 200 to prevent user enumeration.
     Rate limited to 5 requests per IP per 15 minutes.
@@ -230,12 +238,16 @@ async def forgot_password(request: Request, response: Response, body: ForgotPass
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to send password reset email.",
             )
-    return {"message": "If that email is registered, you'll receive a reset link shortly."}
+    return {
+        "message": "If that email is registered, you'll receive a reset link shortly."
+    }
 
 
 @app.post("/auth/reset-password")
 @limiter.limit("10/hour")
-async def reset_password(request: Request, response: Response, body: ResetPasswordRequest):
+async def reset_password(
+    request: Request, response: Response, body: ResetPasswordRequest
+):
     """
     Reset a user's password using a valid reset token.
     Token field validated by Pydantic (must be exactly 43 chars).
