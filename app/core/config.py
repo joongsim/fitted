@@ -157,6 +157,17 @@ class Config:
         return os.environ.get("AWS_DEFAULT_REGION") or os.environ.get("AWS_REGION", "us-west-1")
 
     @property
+    def embedding_service_url(self) -> Optional[str]:
+        """Remote CLIP embedding server URL (e.g. http://localhost:8001 via reverse tunnel).
+
+        Returns None when not configured — embedding_service falls back to loading CLIP locally.
+        """
+        try:
+            return self.get_parameter("/fitted/embedding-service-url")
+        except Exception:
+            return os.environ.get("EMBEDDING_SERVICE_URL")
+
+    @property
     def disable_email(self) -> bool:
         """If true, log reset URLs instead of sending via SES (dev/CI mode)."""
         return os.environ.get("DISABLE_EMAIL", "false").lower() == "true"

@@ -159,7 +159,9 @@ def _remote_url() -> str | None:
     """
     import urllib.parse
 
-    url = os.environ.get("EMBEDDING_SERVICE_URL")
+    from app.core.config import config
+
+    url = config.embedding_service_url
     if url is None:
         return None
     parsed = urllib.parse.urlparse(url)
