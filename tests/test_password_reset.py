@@ -1,4 +1,5 @@
 """Tests for password reset feature."""
+import pytest
 
 
 def test_migration_sql_contains_reset_token_column():
@@ -63,3 +64,47 @@ def test_config_disable_email_true_when_env_set(monkeypatch):
     from app.core.config import Config
     c = Config()
     assert c.disable_email is True
+
+
+# --- Pydantic model tests ---
+
+
+def test_forgot_password_request_valid_email():
+    from app.models.user import ForgotPasswordRequest
+    req = ForgotPasswordRequest(email="user@example.com")
+    assert req.email == "user@example.com"
+
+
+def test_forgot_password_request_rejects_invalid_email():
+    from app.models.user import ForgotPasswordRequest
+    from pydantic import ValidationError
+    with pytest.raises(ValidationError):
+        ForgotPasswordRequest(email="not-an-email")
+
+
+def test_reset_password_request_valid():
+    from app.models.user import ResetPasswordRequest
+    req = ResetPasswordRequest(token="a" * 43, new_password="password123")
+    assert req.token == "a" * 43
+    assert req.new_password == "password123"
+
+
+def test_reset_password_request_rejects_short_password():
+    from app.models.user import ResetPasswordRequest
+    from pydantic import ValidationError
+    with pytest.raises(ValidationError):
+        ResetPasswordRequest(token="a" * 43, new_password="short")
+
+
+def test_reset_password_request_rejects_long_password():
+    from app.models.user import ResetPasswordRequest
+    from pydantic import ValidationError
+    with pytest.raises(ValidationError):
+        ResetPasswordRequest(token="a" * 43, new_password="x" * 129)
+
+
+def test_reset_password_request_rejects_wrong_token_length():
+    from app.models.user import ResetPasswordRequest
+    from pydantic import ValidationError
+    with pytest.raises(ValidationError):
+        ResetPasswordRequest(token="tooshort", new_password="password123")
