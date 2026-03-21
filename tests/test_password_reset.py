@@ -218,9 +218,9 @@ class TestStoreResetToken:
         with _patch_get_connection(mock_conn):
             await user_service.store_reset_token(MOCK_USER_EMAIL, token_hash, expires)
 
-        call_args = mock_cur.execute.await_args
-        assert token_hash in str(call_args)
-        assert MOCK_USER_EMAIL in str(call_args)
+        params = mock_cur.execute.await_args.args[1]
+        assert token_hash in params
+        assert MOCK_USER_EMAIL in params
 
     async def test_unknown_email_is_noop_no_exception(self):
         from app.services import user_service
