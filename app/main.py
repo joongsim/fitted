@@ -35,13 +35,8 @@ from app.core.config import config
 from app.services import analysis_service
 from app.services import user_service
 from app.core import auth
-from app.models.user import (
-    UserCreate,
-    User,
-    Token,
-    ForgotPasswordRequest,
-    ResetPasswordRequest,
-)
+from app.core.context import correlation_id as _correlation_id
+from app.models.user import UserCreate, User, Token, ForgotPasswordRequest, ResetPasswordRequest
 from app.services import email_service
 from app.models.product import ProductRecommendation
 from app.models.wardrobe import WardrobeItemUpdate
@@ -120,6 +115,19 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def correlation_id_middleware(request: Request, call_next):
+    """Attach a per-request correlation ID for log tracing (no PII)."""
+    cid = request.headers.get("X-Correlation-ID") or secrets.token_hex(8)
+    token = _correlation_id.set(cid)
+    try:
+        response = await call_next(request)
+        response.headers["X-Correlation-ID"] = cid
+        return response
+    finally:
+        _correlation_id.reset(token)
 
 
 @app.get("/")
@@ -225,9 +233,7 @@ async def forgot_password(
         try:
             await email_service.send_password_reset_email(body.email, reset_url)
         except Exception:
-            logger.error(
-                "Failed to send password reset email to %s", body.email, exc_info=True
-            )
+            logger.error("Failed to send password reset email. cid=%s", _correlation_id.get(), exc_info=True)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to send password reset email.",
@@ -257,7 +263,7 @@ async def reset_password(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Reset link is invalid or has expired.",
         )
-    logger.info("Password reset successful")
+    logger.info("Password reset successful. cid=%s", _correlation_id.get())
     return {"message": "Password updated successfully."}
 
 

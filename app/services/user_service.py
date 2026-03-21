@@ -225,7 +225,8 @@ async def reset_password(
                     (new_hashed_password, changed_at, user_id),
                 )
                 await conn.commit()
-                logger.info("Password reset completed.")
+                from app.core.context import correlation_id as _correlation_id
+                logger.info("Password reset completed. cid=%s", _correlation_id.get())
                 return {"user_id": user_id, "email": email}
             except Exception:
                 await conn.rollback()

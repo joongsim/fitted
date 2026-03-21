@@ -2,7 +2,12 @@
 # Requires: SSH tunnel open (make tunnel) and venv active
 # To offload CLIP to local GPU: make embed-server  (then in separate terminal: make tunnel-embed)
 
-PYTHON := .venv/bin/python
+# Detect Windows (Git Bash / MINGW) vs Unix
+ifeq ($(OS),Windows_NT)
+  PYTHON := .venv/Scripts/python
+else
+  PYTHON := .venv/bin/python
+endif
 # Fetch DB URL from SSM at runtime and rewrite host to localhost (SSH tunnel)
 _SSM_URL := $(shell aws ssm get-parameter --name "/fitted/database-url" --with-decryption --region us-west-1 --query "Parameter.Value" --output text 2>/dev/null)
 DB_URL   := $(shell echo "$(_SSM_URL)" | sed 's|@.*:|@localhost:|')
@@ -32,6 +37,18 @@ pretrain:
 
 train:
 	$(RUN) scripts/train_two_towers.py $(ARGS)
+
+# ── Misc ──────────────────────────────────────────────────────────────────────
+
+# ── Database ──────────────────────────────────────────────────────────────────
+
+.PHONY: migrate migrate-password-reset
+
+migrate:
+	$(RUN) scripts/db_migrate.py
+
+migrate-password-reset:
+	$(RUN) scripts/db_migrate.py --password-reset
 
 # ── Misc ──────────────────────────────────────────────────────────────────────
 

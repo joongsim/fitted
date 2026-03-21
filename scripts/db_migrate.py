@@ -305,4 +305,7 @@ def migrate_password_reset() -> None:
 
 
 if __name__ == "__main__":
-    migrate()
+    if len(sys.argv) > 1 and sys.argv[1] == "--password-reset":
+        migrate_password_reset()
+    else:
+        migrate()
