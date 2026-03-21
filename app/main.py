@@ -45,7 +45,11 @@ logger = logging.getLogger(__name__)
 
 
 def _get_client_ip(request) -> str:
-    """Extract real client IP, trusting X-Forwarded-For from Caddy reverse proxy."""
+    """Extract real client IP from X-Forwarded-For (set by Caddy).
+
+    Safe to trust unconditionally because the app binds to 127.0.0.1 and is
+    only reachable via Caddy. Direct external access to port 8000 is not possible.
+    """
     forwarded_for = request.headers.get("X-Forwarded-For")
     if forwarded_for:
         return forwarded_for.split(",")[0].strip()
@@ -80,12 +84,17 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 
 async def _unhandled_exception_handler(request: Request, exc: Exception):
-    from fastapi.responses import JSONResponse
-
-    logger.error("Unhandled exception: %s", exc, exc_info=True)
+    """Convert unhandled non-HTTP exceptions to 500. Re-delegate HTTP/validation errors."""
+    from fastapi.exception_handlers import http_exception_handler, request_validation_exception_handler
+    from fastapi.exceptions import RequestValidationError
+    if isinstance(exc, HTTPException):
+        return await http_exception_handler(request, exc)
+    if isinstance(exc, RequestValidationError):
+        return await request_validation_exception_handler(request, exc)
+    logger.error("Unhandled exception on %s %s", request.method, request.url.path, exc_info=True)
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        content={"detail": "Internal server error"},
+        content={"detail": "Internal server error."},
     )
 
 
