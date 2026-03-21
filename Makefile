@@ -42,13 +42,10 @@ train:
 
 # ── Database ──────────────────────────────────────────────────────────────────
 
-.PHONY: migrate migrate-password-reset
+.PHONY: migrate
 
 migrate:
 	$(RUN) scripts/db_migrate.py
-
-migrate-password-reset:
-	$(RUN) scripts/db_migrate.py --password-reset
 
 # ── Misc ──────────────────────────────────────────────────────────────────────
 

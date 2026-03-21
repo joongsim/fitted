@@ -213,9 +213,8 @@ CREATE INDEX IF NOT EXISTS idx_affiliate_clicks_user
 -- Index for fast redirect lookups by click_id (primary key covers this; added for clarity)
 CREATE INDEX IF NOT EXISTS idx_affiliate_clicks_clicked_at
     ON affiliate_clicks (clicked_at) WHERE clicked_at IS NOT NULL;
-"""
 
-MIGRATION_SQL = """
+-- Password reset columns
 ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token VARCHAR(64);
 ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token_expires_at TIMESTAMPTZ;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS password_changed_at TIMESTAMPTZ;
@@ -283,29 +282,5 @@ def migrate() -> None:
         sys.exit(1)
 
 
-def migrate_password_reset() -> None:
-    """Apply the password reset migration (adds reset_token columns)."""
-    try:
-        database_url = config.database_url
-    except Exception as e:
-        print(f"Error: could not load DATABASE_URL — {e}", file=sys.stderr)
-        sys.exit(1)
-
-    print("Connecting to database...")
-    try:
-        with psycopg.connect(database_url, autocommit=True) as conn:
-            with conn.cursor() as cur:
-                print("Applying password reset migration...")
-                for statement in _split_statements(MIGRATION_SQL):
-                    cur.execute(statement)
-                print("Password reset migration successful.")
-    except Exception as e:
-        print(f"Migration failed: {e}", file=sys.stderr)
-        sys.exit(1)
-
-
 if __name__ == "__main__":
-    if len(sys.argv) > 1 and sys.argv[1] == "--password-reset":
-        migrate_password_reset()
-    else:
-        migrate()
+    migrate()
