@@ -9,5 +9,7 @@ python-dotenv>=1.0.0
 python-multipart>=0.0.22
 uvicorn>=0.34.0
 
+slowapi>=0.1.9
+
 # Dev / Test
 pytest>=8.0.0

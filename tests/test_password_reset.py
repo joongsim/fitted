@@ -411,3 +411,11 @@ def _make_request_with_token(token: str):
     mock_request.headers = {}
     mock_request.url.path = "/test"
     return mock_request
+
+
+# --- Rate limiter setup test ---
+
+def test_app_has_rate_limiter_state():
+    """The FastAPI app should have a slowapi limiter attached to app.state."""
+    from app.main import app
+    assert hasattr(app.state, "limiter")
