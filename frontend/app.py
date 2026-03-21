@@ -914,8 +914,13 @@ async def forgot_password(email: str, session):
 
 
 @app.get("/reset-password")
-def reset_password_page(token: str, session):
+def reset_password_page(session, token: str = None):
     """Render the set-new-password form. Token comes from the email link query param."""
+    if not token:
+        return RedirectResponse("/forgot-password", status_code=303)
+    import re
+    if not re.fullmatch(r'[A-Za-z0-9_\-]{10,100}', token):
+        return RedirectResponse("/forgot-password", status_code=303)
     return Title("Set New Password - Fitted"), Body(
         nav_bar(session),
         Div(
