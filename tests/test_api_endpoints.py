@@ -79,6 +79,17 @@ def _auth_headers(user_id: str = MOCK_USER_ID) -> dict:
     return {"Authorization": f"Bearer {token}"}
 
 
+@pytest.fixture(autouse=True)
+def _patch_password_changed_at():
+    """Prevent get_password_changed_at from hitting DB in existing auth tests."""
+    with patch(
+        "app.core.auth.get_password_changed_at",
+        new_callable=AsyncMock,
+        return_value=None,  # NULL → user never reset, all tokens valid
+    ):
+        yield
+
+
 # ---------------------------------------------------------------------------
 # GET / — root
 # ---------------------------------------------------------------------------

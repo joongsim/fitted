@@ -1,7 +1,7 @@
 """Tests for app/core/auth.py — JWT creation/validation and password hashing."""
 import os
 from datetime import timedelta
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import bcrypt
 import pytest
@@ -44,6 +44,17 @@ def _make_token(sub: str, secret: str = KNOWN_SECRET, algorithm: str = KNOWN_ALG
     """Encode a JWT directly with python-jose for test setup."""
     payload = {"sub": sub, **extra_claims}
     return jwt.encode(payload, secret, algorithm=algorithm)
+
+
+@pytest.fixture(autouse=True)
+def _patch_password_changed_at():
+    """Prevent get_password_changed_at from hitting DB in existing auth tests."""
+    with patch(
+        "app.core.auth.get_password_changed_at",
+        new_callable=AsyncMock,
+        return_value=None,  # NULL → user never reset, all tokens valid
+    ):
+        yield
 
 
 # ---------------------------------------------------------------------------

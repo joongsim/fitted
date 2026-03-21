@@ -312,3 +312,75 @@ class TestResetPassword:
             result = await user_service.reset_password("j" * 64, "$2b$hashed", datetime.now(timezone.utc))
 
         assert result is None
+
+
+# --- JWT invalidation tests ---
+# Note: password_changed_at comes from DB as a timezone-aware datetime (TIMESTAMPTZ + psycopg3).
+# In the auth check, we use calendar.timegm() to convert it to UTC epoch safely regardless
+# of server local timezone.
+
+class TestJWTInvalidationAfterPasswordReset:
+    async def test_token_issued_before_password_change_is_rejected(self):
+        import os
+        from unittest.mock import patch
+        from app.core.auth import create_access_token, get_current_user_id
+        from datetime import timezone
+        from fastapi import HTTPException
+
+        # Create a token, then set password_changed_at to 5 seconds in the future.
+        # psycopg3 returns TIMESTAMPTZ as timezone-aware datetime — use datetime.now(timezone.utc).
+        future_change = datetime.now(timezone.utc) + timedelta(seconds=5)
+        token = create_access_token({"sub": MOCK_USER_ID})
+        request = _make_request_with_token(token)
+
+        async def fake_get_password_changed_at(user_id):
+            return future_change
+
+        with patch.dict(os.environ, {"DEV_MODE": "false"}):
+            with patch("app.core.auth.get_password_changed_at", side_effect=fake_get_password_changed_at):
+                with pytest.raises(HTTPException) as exc_info:
+                    await get_current_user_id(request)
+        assert exc_info.value.status_code == 401
+
+    async def test_token_issued_after_password_change_is_allowed(self):
+        import os
+        from unittest.mock import patch
+        from app.core.auth import create_access_token, get_current_user_id
+
+        # password_changed_at is far in the past — token was issued after it
+        past_change = datetime(2020, 1, 1)  # naive UTC, far past
+        token = create_access_token({"sub": MOCK_USER_ID})
+        request = _make_request_with_token(token)
+
+        async def fake_get_password_changed_at(user_id):
+            return past_change
+
+        with patch.dict(os.environ, {"DEV_MODE": "false"}):
+            with patch("app.core.auth.get_password_changed_at", side_effect=fake_get_password_changed_at):
+                user_id = await get_current_user_id(request)
+        assert user_id == MOCK_USER_ID
+
+    async def test_null_password_changed_at_allows_all_tokens(self):
+        import os
+        from unittest.mock import patch
+        from app.core.auth import create_access_token, get_current_user_id
+
+        token = create_access_token({"sub": MOCK_USER_ID})
+        request = _make_request_with_token(token)
+
+        async def fake_get_password_changed_at(user_id):
+            return None  # NULL — user has never reset
+
+        with patch.dict(os.environ, {"DEV_MODE": "false"}):
+            with patch("app.core.auth.get_password_changed_at", side_effect=fake_get_password_changed_at):
+                user_id = await get_current_user_id(request)
+        assert user_id == MOCK_USER_ID
+
+
+def _make_request_with_token(token: str):
+    from unittest.mock import MagicMock
+    mock_request = MagicMock()
+    mock_request.cookies = {"access_token": token}
+    mock_request.headers = {}
+    mock_request.url.path = "/test"
+    return mock_request
