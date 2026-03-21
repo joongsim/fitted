@@ -773,6 +773,10 @@ def login_page(session):
                 A("Register here", href="/register"),
                 cls="auth-link",
             ),
+            Div(
+                A("Forgot your password?", href="/forgot-password"),
+                cls="auth-link",
+            ),
             cls="container",
         ),
     )
@@ -866,6 +870,112 @@ async def register(full_name: str, email: str, password: str, session):
 def logout(session):
     session.pop("access_token", None)
     return RedirectResponse("/login")
+
+
+@app.get("/forgot-password")
+def forgot_password_page(session):
+    return Title("Forgot Password - Fitted"), Body(
+        nav_bar(session),
+        Div(
+            H2("Reset your password"),
+            P("Enter your email address and we'll send you a reset link."),
+            Form(
+                Input(type="email", name="email", placeholder="Email address", required=True),
+                Button("Send reset link", type="submit"),
+                hx_post="/forgot-password",
+                hx_target="#forgot-result",
+                cls="auth-form",
+            ),
+            Div(id="forgot-result"),
+            Div(
+                A("Back to login", href="/login"),
+                cls="auth-link",
+            ),
+            cls="container",
+        ),
+    )
+
+
+@app.post("/forgot-password")
+async def forgot_password(email: str, session):
+    async with httpx.AsyncClient() as client:
+        try:
+            await client.post(
+                f"{API_BASE_URL}/auth/forgot-password",
+                json={"email": email},
+            )
+        except Exception:
+            logger.error("Frontend forgot-password request to backend failed.", exc_info=True)
+    # Always show the same message regardless of outcome (no enumeration)
+    return P(
+        "If that email is registered, you'll receive a reset link shortly.",
+        id="forgot-result",
+    )
+
+
+@app.get("/reset-password")
+def reset_password_page(session, token: str = None):
+    """Render the set-new-password form. Token comes from the email link query param."""
+    if not token:
+        return RedirectResponse("/forgot-password", status_code=303)
+    import re
+    if not re.fullmatch(r'[A-Za-z0-9_\-]{10,100}', token):
+        return RedirectResponse("/forgot-password", status_code=303)
+    return Title("Set New Password - Fitted"), Body(
+        nav_bar(session),
+        Div(
+            H2("Set a new password"),
+            Form(
+                # Token submitted in POST body — NOT re-submitted in URL
+                Input(type="hidden", name="token", value=token),
+                Input(
+                    type="password",
+                    name="new_password",
+                    placeholder="New password (8–128 characters)",
+                    required=True,
+                    minlength="8",
+                    maxlength="128",
+                ),
+                Input(
+                    type="password",
+                    name="confirm_password",
+                    placeholder="Confirm new password",
+                    required=True,
+                ),
+                Button("Update password", type="submit"),
+                hx_post="/reset-password",
+                hx_target="body",
+                cls="auth-form",
+            ),
+            Div(
+                A("Back to login", href="/login"),
+                cls="auth-link",
+            ),
+            cls="container",
+        ),
+    )
+
+
+@app.post("/reset-password")
+async def reset_password(token: str, new_password: str, confirm_password: str, session):
+    if new_password != confirm_password:
+        return error_message("Passwords do not match")
+
+    async with httpx.AsyncClient() as client:
+        try:
+            resp = await client.post(
+                f"{API_BASE_URL}/auth/reset-password",
+                json={"token": token, "new_password": new_password},
+            )
+            if resp.status_code == 200:
+                logger.info("Password reset completed via frontend.")
+                return RedirectResponse("/login?reset=success", status_code=303)
+            err = resp.json().get("detail", "Reset failed")
+            logger.warning("Frontend password reset failed: status=%d detail=%s", resp.status_code, err)
+            return error_message(f"{err} — try requesting a new reset link.")
+        except Exception:
+            logger.error("Frontend reset-password request to backend failed.", exc_info=True)
+            return error_message("Reset failed: could not reach the server")
 
 
 @app.post("/get-outfit")

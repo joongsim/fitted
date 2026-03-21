@@ -145,3 +145,4 @@ docs/personal/
 
 frontend/.sesskey
 notebooks/recommender_playground.ipynb
+.worktrees/

@@ -1,5 +1,6 @@
 # app/main.py
-from datetime import datetime
+import secrets
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 import boto3
 import os
@@ -13,12 +14,15 @@ from fastapi import (
     HTTPException,
     Query,
     Depends,
+    Request,
     Response,
     UploadFile,
     status,
 )
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordRequestForm
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 import asyncio
 
 from typing import Annotated
@@ -31,12 +35,25 @@ from app.core.config import config
 from app.services import analysis_service
 from app.services import user_service
 from app.core import auth
-from app.models.user import UserCreate, User, Token
+from app.models.user import UserCreate, User, Token, ForgotPasswordRequest, ResetPasswordRequest
+from app.services import email_service
 from app.models.product import ProductRecommendation
 from app.models.wardrobe import WardrobeItemUpdate
 from app.services import db_service
 
 logger = logging.getLogger(__name__)
+
+
+def _get_client_ip(request) -> str:
+    """Extract real client IP from X-Forwarded-For (set by Caddy).
+
+    Safe to trust unconditionally because the app binds to 127.0.0.1 and is
+    only reachable via Caddy. Direct external access to port 8000 is not possible.
+    """
+    forwarded_for = request.headers.get("X-Forwarded-For")
+    if forwarded_for:
+        return forwarded_for.split(",")[0].strip()
+    return request.client.host
 
 
 class RecommendRequest(BaseModel):
@@ -59,6 +76,29 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+
+# Rate limiter — keyed by real client IP via X-Forwarded-For (set by Caddy reverse proxy)
+limiter = Limiter(key_func=_get_client_ip, headers_enabled=True)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+
+async def _unhandled_exception_handler(request: Request, exc: Exception):
+    """Convert unhandled non-HTTP exceptions to 500. Re-delegate HTTP/validation errors."""
+    from fastapi.exception_handlers import http_exception_handler, request_validation_exception_handler
+    from fastapi.exceptions import RequestValidationError
+    if isinstance(exc, HTTPException):
+        return await http_exception_handler(request, exc)
+    if isinstance(exc, RequestValidationError):
+        return await request_validation_exception_handler(request, exc)
+    logger.error("Unhandled exception on %s %s", request.method, request.url.path, exc_info=True)
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={"detail": "Internal server error."},
+    )
+
+
+app.add_exception_handler(Exception, _unhandled_exception_handler)
 
 # Add CORS middleware
 app.add_middleware(
@@ -152,6 +192,53 @@ async def logout(response: Response):
     """Logout user by clearing the auth cookie."""
     response.delete_cookie("access_token")
     return {"message": "Successfully logged out"}
+
+
+@app.post("/auth/forgot-password")
+@limiter.limit("5/15minutes")
+async def forgot_password(request: Request, response: Response, body: ForgotPasswordRequest):
+    """
+    Request a password reset email. Always returns 200 to prevent user enumeration.
+    Rate limited to 5 requests per IP per 15 minutes.
+    """
+    user = await user_service.get_user_by_email(body.email)
+    if user and user.get("is_active"):
+        raw_token = secrets.token_urlsafe(32)
+        token_hash = auth.hash_reset_token(raw_token)
+        expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
+        await user_service.store_reset_token(body.email, token_hash, expires_at)
+        reset_url = f"{config.frontend_url}/reset-password?token={raw_token}"
+        try:
+            await email_service.send_password_reset_email(body.email, reset_url)
+        except Exception:
+            logger.error("Failed to send password reset email to %s", body.email, exc_info=True)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to send password reset email.",
+            )
+    return {"message": "If that email is registered, you'll receive a reset link shortly."}
+
+
+@app.post("/auth/reset-password")
+@limiter.limit("10/hour")
+async def reset_password(request: Request, response: Response, body: ResetPasswordRequest):
+    """
+    Reset a user's password using a valid reset token.
+    Token field validated by Pydantic (must be exactly 43 chars).
+    Rate limited to 10 requests per IP per hour.
+    """
+    token_hash = auth.hash_reset_token(body.token)
+    changed_at = datetime.now(timezone.utc)
+    new_hashed = auth.get_password_hash(body.new_password)
+
+    result = await user_service.reset_password(token_hash, new_hashed, changed_at)
+    if result is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Reset link is invalid or has expired.",
+        )
+    logger.info("Password reset successful")
+    return {"message": "Password updated successfully."}
 
 
 # --- User Profile Endpoints ---

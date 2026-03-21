@@ -29,10 +29,7 @@ class Config:
     def ssm_client(self):
         """Lazy-load SSM client."""
         if self._ssm_client is None:
-            region = os.environ.get("AWS_DEFAULT_REGION") or os.environ.get(
-                "AWS_REGION", "us-west-1"
-            )
-            self._ssm_client = boto3.client("ssm", region_name=region)
+            self._ssm_client = boto3.client("ssm", region_name=self.aws_region)
         return self._ssm_client
 
     @lru_cache(maxsize=32)
@@ -148,6 +145,28 @@ class Config:
         return int(
             self.get_parameter("/fitted/access-token-expire-minutes", default="1440")
         )  # 24 hours
+
+    @property
+    def ses_sender_email(self) -> str:
+        """Get the verified SES sender email address."""
+        return self.get_parameter("/fitted/ses-sender-email", default="noreply@example.com")
+
+    @property
+    def aws_region(self) -> str:
+        """Get the AWS region for SES."""
+        return os.environ.get("AWS_DEFAULT_REGION") or os.environ.get("AWS_REGION", "us-west-1")
+
+    @property
+    def disable_email(self) -> bool:
+        """If true, log reset URLs instead of sending via SES (dev/CI mode)."""
+        return os.environ.get("DISABLE_EMAIL", "false").lower() == "true"
+
+    @property
+    def frontend_url(self) -> str:
+        """Base URL of the frontend app (used in reset email links)."""
+        return self.get_parameter(
+            "/fitted/frontend-url", default="http://localhost:5001"
+        )
 
 
 # Global config instance

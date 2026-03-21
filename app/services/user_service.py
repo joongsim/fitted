@@ -1,5 +1,6 @@
 import json
 import logging
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 from app.core.auth import get_password_hash
@@ -161,3 +162,72 @@ async def update_user_preferences(
         style_prefs is not None,
         size_info is not None,
     )
+
+
+async def store_reset_token(email: str, token_hash: str, expires_at: datetime) -> None:
+    """
+    Store a HMAC-SHA256 reset token hash for a user.
+    No-op if email is not found (UPDATE affects 0 rows — caller does not check row count).
+    """
+    async with get_connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "UPDATE users SET reset_token = %s, reset_token_expires_at = %s WHERE email = %s",
+                (token_hash, expires_at, email),
+            )
+            await conn.commit()
+    logger.debug("Stored reset token for email=%s", email)
+
+
+async def reset_password(
+    token_hash: str, new_hashed_password: str, changed_at: datetime
+) -> Optional[Dict[str, Any]]:
+    """
+    Atomically consume a reset token and update the user's password in one transaction.
+
+    The consume step uses UPDATE ... RETURNING to atomically validate and clear the token.
+    If the token is not found, expired, or the user is inactive, returns None.
+    Both operations run in a single psycopg3 transaction (no half-reset state on crash).
+
+    Args:
+        token_hash: HMAC-SHA256 hex digest of the raw token (from hash_reset_token).
+        new_hashed_password: bcrypt hash of the new password.
+        changed_at: datetime.now(timezone.utc) from the caller — used for password_changed_at.
+                    Must use the app clock (not DB NOW()) to match JWT iat clock source.
+
+    Returns:
+        Dict with user_id and email if successful, None otherwise.
+    """
+    async with get_connection() as conn:
+        async with conn.cursor() as cur:
+            try:
+                # Step 1: Atomically consume the token (validate + clear in one statement)
+                await cur.execute(
+                    """
+                    UPDATE users
+                    SET reset_token = NULL, reset_token_expires_at = NULL
+                    WHERE reset_token = %s
+                      AND reset_token_expires_at > NOW()
+                      AND is_active = TRUE
+                    RETURNING user_id, email
+                    """,
+                    (token_hash,),
+                )
+                row = await cur.fetchone()
+                if not row:
+                    return None
+
+                user_id, email = row[0], row[1]
+
+                # Step 2: Update password and record change timestamp
+                await cur.execute(
+                    "UPDATE users SET hashed_password = %s, password_changed_at = %s WHERE user_id = %s",
+                    (new_hashed_password, changed_at, user_id),
+                )
+                await conn.commit()
+                logger.info("Password reset completed for user_id=%s", user_id)
+                return {"user_id": user_id, "email": email}
+            except Exception:
+                await conn.rollback()
+                logger.exception("Password reset failed — transaction rolled back.")
+                return None

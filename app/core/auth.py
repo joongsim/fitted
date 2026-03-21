@@ -1,5 +1,9 @@
+import calendar
+import hashlib
+import hmac
 import logging
 import os
+import time
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -27,6 +31,33 @@ def get_password_hash(password: str) -> str:
     return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
 
 
+def hash_reset_token(raw_token: str) -> str:
+    """
+    HMAC-SHA256 hash of a reset token keyed with the JWT secret.
+    Always returns a 64-character hex string. Never store the raw token.
+    """
+    return hmac.new(
+        config.jwt_secret_key.encode(),
+        raw_token.encode(),
+        hashlib.sha256,
+    ).hexdigest()
+
+
+async def get_password_changed_at(user_id: str) -> Optional[datetime]:
+    """Fetch password_changed_at timestamp for a user. Returns None if never reset."""
+    from app.services.db_service import get_connection
+    async with get_connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT password_changed_at FROM users WHERE user_id = %s",
+                (user_id,),
+            )
+            row = await cur.fetchone()
+            if row:
+                return row[0]  # May be None if never reset
+            return None
+
+
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     """
     Create a new JWT access token.
@@ -46,7 +77,10 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
             minutes=config.access_token_expire_minutes
         )
 
-    to_encode.update({"exp": expire})
+    to_encode.update({
+        "exp": expire,
+        "iat": int(time.time()),   # python-jose does not auto-include iat — must add explicitly
+    })
     encoded_jwt = jwt.encode(
         to_encode,
         config.jwt_secret_key,
@@ -115,6 +149,25 @@ async def get_current_user_id(request: Request) -> str:
                 detail="Invalid token: missing sub",
             )
         logger.debug("JWT validated for user_id=%s path=%s", user_id, request.url.path)
+
+        # Check if this token was issued before a password reset
+        # (rejects all sessions created before the most recent password change)
+        token_iat: int = payload.get("iat", 0)
+        password_changed_at = await get_password_changed_at(user_id)
+        if password_changed_at is not None:
+            # Use calendar.timegm() to treat naive datetime as UTC regardless of server timezone.
+            # Use strict < so tokens issued at the same second as the change are allowed
+            # (the new post-reset login session must not be immediately rejected)
+            changed_at_ts = calendar.timegm(password_changed_at.utctimetuple())
+            if token_iat < changed_at_ts:
+                logger.warning(
+                    "Token predates password change for user_id=%s — rejecting.", user_id
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Token invalidated. Please log in again.",
+                )
+
         return user_id
     except JWTError:
         logger.warning(
