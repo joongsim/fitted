@@ -159,3 +159,156 @@ def test_create_access_token_includes_iat_claim():
     payload = jwt.decode(token, config.jwt_secret_key, algorithms=["HS256"])
     assert "iat" in payload
     assert isinstance(payload["iat"], int)
+
+
+# --- User service tests ---
+# Uses the same _make_mock_conn / _patch_get_connection helpers as test_user_service.py
+
+from contextlib import asynccontextmanager
+from unittest.mock import AsyncMock, MagicMock, patch
+from datetime import datetime, timezone, timedelta
+from uuid import UUID
+from tests.conftest import MOCK_USER_ID, MOCK_USER_EMAIL
+
+
+def _make_mock_conn(fetchone_return=None):
+    mock_cur = AsyncMock()
+    mock_cur.fetchone = AsyncMock(return_value=fetchone_return)
+    mock_cur.execute = AsyncMock()
+    mock_cur_ctx = MagicMock()
+    mock_cur_ctx.__aenter__ = AsyncMock(return_value=mock_cur)
+    mock_cur_ctx.__aexit__ = AsyncMock(return_value=False)
+    mock_conn = MagicMock()
+    mock_conn.cursor = MagicMock(return_value=mock_cur_ctx)
+    mock_conn.commit = AsyncMock()
+    mock_conn.rollback = AsyncMock()
+    return mock_conn, mock_cur
+
+
+@asynccontextmanager
+async def _mock_get_connection(mock_conn):
+    yield mock_conn
+
+
+def _patch_get_connection(mock_conn):
+    return patch(
+        "app.services.user_service.get_connection",
+        return_value=_mock_get_connection(mock_conn),
+    )
+
+
+class TestStoreResetToken:
+    async def test_executes_update_and_commits(self):
+        from app.services import user_service
+        mock_conn, mock_cur = _make_mock_conn()
+        expires = datetime.now(timezone.utc) + timedelta(hours=1)
+
+        with _patch_get_connection(mock_conn):
+            await user_service.store_reset_token(MOCK_USER_EMAIL, "a" * 64, expires)
+
+        mock_cur.execute.assert_awaited_once()
+        mock_conn.commit.assert_awaited_once()
+
+    async def test_passes_hash_and_expiry_to_query(self):
+        from app.services import user_service
+        mock_conn, mock_cur = _make_mock_conn()
+        token_hash = "b" * 64
+        expires = datetime.now(timezone.utc) + timedelta(hours=1)
+
+        with _patch_get_connection(mock_conn):
+            await user_service.store_reset_token(MOCK_USER_EMAIL, token_hash, expires)
+
+        call_args = mock_cur.execute.await_args
+        assert token_hash in str(call_args)
+        assert MOCK_USER_EMAIL in str(call_args)
+
+    async def test_unknown_email_is_noop_no_exception(self):
+        from app.services import user_service
+        mock_conn, mock_cur = _make_mock_conn()
+
+        with _patch_get_connection(mock_conn):
+            # Should not raise even if 0 rows updated
+            await user_service.store_reset_token("nobody@example.com", "c" * 64, datetime.now(timezone.utc))
+
+        mock_cur.execute.assert_awaited_once()  # SQL still runs; no error
+
+
+class TestResetPassword:
+    async def test_valid_token_returns_user_dict(self):
+        from app.services import user_service
+        user_row = (UUID(MOCK_USER_ID), MOCK_USER_EMAIL)
+        mock_conn, mock_cur = _make_mock_conn(fetchone_return=user_row)
+        changed_at = datetime.now(timezone.utc)
+
+        with _patch_get_connection(mock_conn):
+            result = await user_service.reset_password("d" * 64, "$2b$hashed", changed_at)
+
+        assert result is not None
+        assert result["user_id"] == UUID(MOCK_USER_ID)
+        assert result["email"] == MOCK_USER_EMAIL
+
+    async def test_invalid_or_expired_token_returns_none(self):
+        from app.services import user_service
+        mock_conn, mock_cur = _make_mock_conn(fetchone_return=None)
+        changed_at = datetime.now(timezone.utc)
+
+        with _patch_get_connection(mock_conn):
+            result = await user_service.reset_password("e" * 64, "$2b$hashed", changed_at)
+
+        assert result is None
+
+    async def test_commits_transaction_on_success(self):
+        from app.services import user_service
+        user_row = (UUID(MOCK_USER_ID), MOCK_USER_EMAIL)
+        mock_conn, mock_cur = _make_mock_conn(fetchone_return=user_row)
+
+        with _patch_get_connection(mock_conn):
+            await user_service.reset_password("f" * 64, "$2b$hashed", datetime.now(timezone.utc))
+
+        mock_conn.commit.assert_awaited_once()
+
+    async def test_rollback_on_exception(self):
+        from app.services import user_service
+        mock_conn, mock_cur = _make_mock_conn()
+        mock_cur.execute.side_effect = Exception("DB error")
+
+        with _patch_get_connection(mock_conn):
+            result = await user_service.reset_password("g" * 64, "$2b$hashed", datetime.now(timezone.utc))
+
+        assert result is None
+        mock_conn.rollback.assert_awaited_once()
+
+    async def test_two_executes_on_success_consume_then_update(self):
+        """consume_reset_token SQL + update_password SQL = 2 execute calls."""
+        from app.services import user_service
+        user_row = (UUID(MOCK_USER_ID), MOCK_USER_EMAIL)
+        mock_conn, mock_cur = _make_mock_conn(fetchone_return=user_row)
+
+        with _patch_get_connection(mock_conn):
+            await user_service.reset_password("h" * 64, "$2b$hashed", datetime.now(timezone.utc))
+
+        assert mock_cur.execute.await_count == 2
+
+    async def test_password_changed_at_passed_to_update_not_sql_now(self):
+        from app.services import user_service
+        user_row = (UUID(MOCK_USER_ID), MOCK_USER_EMAIL)
+        mock_conn, mock_cur = _make_mock_conn(fetchone_return=user_row)
+        changed_at = datetime(2026, 3, 20, 12, 0, 0)
+
+        with _patch_get_connection(mock_conn):
+            await user_service.reset_password("i" * 64, "$2b$hashed", changed_at)
+
+        # The changed_at value must appear as a positional arg in the second execute call.
+        # args[1] is the params tuple: (new_hashed_password, changed_at, user_id)
+        second_call_params = mock_cur.execute.await_args_list[1].args[1]
+        assert changed_at in second_call_params
+
+    async def test_inactive_user_token_returns_none(self):
+        """is_active=TRUE guard: token exists but user is inactive → consume returns None."""
+        from app.services import user_service
+        mock_conn, mock_cur = _make_mock_conn(fetchone_return=None)
+
+        with _patch_get_connection(mock_conn):
+            result = await user_service.reset_password("j" * 64, "$2b$hashed", datetime.now(timezone.utc))
+
+        assert result is None
