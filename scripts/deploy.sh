@@ -30,8 +30,7 @@ fi
 # Activate/Update virtual environment
 echo "🐍 Updating virtual environment with uv..."
 [ -d .venv ] || uv venv --python 3.11 --quiet
-source .venv/bin/activate
-uv pip install -r requirements-ec2.txt --quiet
+uv sync --frozen
 
 # NOTE: Database migrations are intentionally excluded from automated deploy.
 # Run manually when needed: ./.venv/bin/python scripts/db_migrate.py
