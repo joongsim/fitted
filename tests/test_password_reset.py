@@ -153,8 +153,9 @@ def test_hash_reset_token_different_inputs_different_outputs():
 
 def test_create_access_token_includes_iat_claim():
     from app.core.auth import create_access_token
+    from app.core.config import config
     from jose import jwt
     token = create_access_token({"sub": "user-1"})
-    payload = jwt.decode(token, "dev-secret-key-change-me-in-prod", algorithms=["HS256"])
+    payload = jwt.decode(token, config.jwt_secret_key, algorithms=["HS256"])
     assert "iat" in payload
     assert isinstance(payload["iat"], int)
