@@ -29,10 +29,7 @@ class Config:
     def ssm_client(self):
         """Lazy-load SSM client."""
         if self._ssm_client is None:
-            region = os.environ.get("AWS_DEFAULT_REGION") or os.environ.get(
-                "AWS_REGION", "us-west-1"
-            )
-            self._ssm_client = boto3.client("ssm", region_name=region)
+            self._ssm_client = boto3.client("ssm", region_name=self.aws_region)
         return self._ssm_client
 
     @lru_cache(maxsize=32)
