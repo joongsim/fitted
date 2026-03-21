@@ -31,6 +31,15 @@ class TestSendPasswordResetEmailDevMode:
         # Full token must NOT be logged
         assert "abcdefgh_rest_of_token" not in caplog.text
 
+    async def test_disable_email_handles_url_without_token_param(self, caplog):
+        with _patch_disable_email(True), caplog.at_level(logging.INFO, logger="app.services.email_service"):
+            from app.services import email_service
+            await email_service.send_password_reset_email(
+                "user@example.com",
+                "https://example.com/reset-password"
+            )
+        assert "<no token param>" in caplog.text
+
 
 class TestSendPasswordResetEmailSES:
     async def test_calls_ses_send_email_with_correct_params(self):

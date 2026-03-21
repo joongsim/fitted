@@ -20,7 +20,10 @@ async def send_password_reset_email(to_email: str, reset_url: str) -> None:
     """
     if config.disable_email:
         # Partial token only — CI logs should still be treated as sensitive.
-        token_part = reset_url.split("token=")[-1][:8] + "..."
+        if "token=" in reset_url:
+            token_part = reset_url.split("token=")[-1][:8] + "..."
+        else:
+            token_part = "<no token param>"
         logger.info("[DEV] Password reset for %s. Token preview: %s", to_email, token_part)
         return
 
@@ -41,9 +44,9 @@ async def send_password_reset_email(to_email: str, reset_url: str) -> None:
                 },
                 "Html": {
                     "Data": (
-                        f"<p><a href='{reset_url}'>Click here</a> to reset your password "
-                        f"(valid 1 hour).</p>"
-                        f"<p>If you did not request this, ignore this email.</p>"
+                        f'<p><a href="{reset_url}">Click here</a> to reset your password '
+                        f'(valid 1 hour).</p>'
+                        f'<p>If you did not request this, ignore this email.</p>'
                     )
                 },
             },
