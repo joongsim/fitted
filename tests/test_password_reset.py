@@ -419,3 +419,123 @@ def test_app_has_rate_limiter_state():
     """The FastAPI app should have a slowapi limiter attached to app.state."""
     from app.main import app
     assert hasattr(app.state, "limiter")
+
+
+# --- Endpoint tests ---
+
+import secrets as _secrets
+
+
+class TestForgotPasswordEndpoint:
+    async def test_returns_200_for_known_active_user(self):
+        from fastapi.testclient import TestClient
+        from app.main import app
+        from unittest.mock import patch, AsyncMock
+
+        with patch("app.services.user_service.get_user_by_email", return_value={
+            "user_id": MOCK_USER_ID, "email": MOCK_USER_EMAIL,
+            "is_active": True, "hashed_password": "$2b$hash",
+        }), patch("app.services.user_service.store_reset_token", new_callable=AsyncMock), \
+             patch("app.services.email_service.send_password_reset_email", new_callable=AsyncMock):
+            client = TestClient(app)
+            resp = client.post("/auth/forgot-password", json={"email": MOCK_USER_EMAIL})
+        assert resp.status_code == 200
+        assert "reset link" in resp.json()["message"].lower()
+
+    async def test_returns_200_for_unknown_email(self):
+        from fastapi.testclient import TestClient
+        from app.main import app
+        from unittest.mock import patch
+
+        with patch("app.services.user_service.get_user_by_email", return_value=None):
+            client = TestClient(app)
+            resp = client.post("/auth/forgot-password", json={"email": "nobody@example.com"})
+        assert resp.status_code == 200
+
+    async def test_returns_200_for_inactive_user(self):
+        from fastapi.testclient import TestClient
+        from app.main import app
+        from unittest.mock import patch
+
+        with patch("app.services.user_service.get_user_by_email", return_value={
+            "user_id": MOCK_USER_ID, "email": MOCK_USER_EMAIL,
+            "is_active": False, "hashed_password": "$2b$hash",
+        }):
+            client = TestClient(app)
+            resp = client.post("/auth/forgot-password", json={"email": MOCK_USER_EMAIL})
+        assert resp.status_code == 200
+
+    async def test_returns_500_when_ses_raises(self):
+        from fastapi.testclient import TestClient
+        from app.main import app
+        from unittest.mock import patch, AsyncMock
+        import botocore.exceptions
+
+        with patch("app.services.user_service.get_user_by_email", return_value={
+            "user_id": MOCK_USER_ID, "email": MOCK_USER_EMAIL,
+            "is_active": True, "hashed_password": "$2b$hash",
+        }), patch("app.services.user_service.store_reset_token", new_callable=AsyncMock), \
+             patch("app.services.email_service.send_password_reset_email",
+                   side_effect=botocore.exceptions.ClientError(
+                       {"Error": {"Code": "MessageRejected", "Message": "Rejected"}},
+                       "SendEmail"
+                   )):
+            client = TestClient(app)
+            resp = client.post("/auth/forgot-password", json={"email": MOCK_USER_EMAIL})
+        assert resp.status_code == 500
+
+
+class TestResetPasswordEndpoint:
+    def _valid_token(self):
+        return _secrets.token_urlsafe(32)  # exactly 43 chars
+
+    async def test_valid_token_returns_200(self):
+        from fastapi.testclient import TestClient
+        from app.main import app
+        from unittest.mock import patch, AsyncMock
+        from uuid import UUID
+
+        raw_token = self._valid_token()
+        with patch("app.services.user_service.reset_password", new_callable=AsyncMock,
+                   return_value={"user_id": UUID(MOCK_USER_ID), "email": MOCK_USER_EMAIL}):
+            client = TestClient(app)
+            resp = client.post("/auth/reset-password", json={
+                "token": raw_token, "new_password": "newpassword123"
+            })
+        assert resp.status_code == 200
+
+    async def test_invalid_token_returns_400(self):
+        from fastapi.testclient import TestClient
+        from app.main import app
+        from unittest.mock import patch, AsyncMock
+
+        raw_token = self._valid_token()
+        with patch("app.services.user_service.reset_password", new_callable=AsyncMock,
+                   return_value=None):
+            client = TestClient(app)
+            resp = client.post("/auth/reset-password", json={
+                "token": raw_token, "new_password": "newpassword123"
+            })
+        assert resp.status_code == 400
+        assert "invalid or has expired" in resp.json()["detail"].lower()
+
+    async def test_wrong_token_length_returns_422(self):
+        from fastapi.testclient import TestClient
+        from app.main import app
+
+        client = TestClient(app)
+        resp = client.post("/auth/reset-password", json={
+            "token": "tooshort", "new_password": "newpassword123"
+        })
+        assert resp.status_code == 422  # Pydantic validation error
+
+    async def test_short_password_returns_422(self):
+        from fastapi.testclient import TestClient
+        from app.main import app
+
+        raw_token = self._valid_token()
+        client = TestClient(app)
+        resp = client.post("/auth/reset-password", json={
+            "token": raw_token, "new_password": "short"
+        })
+        assert resp.status_code == 422
