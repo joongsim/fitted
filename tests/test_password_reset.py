@@ -376,6 +376,33 @@ class TestJWTInvalidationAfterPasswordReset:
                 user_id = await get_current_user_id(request)
         assert user_id == MOCK_USER_ID
 
+    async def test_token_issued_at_exact_same_second_as_password_change_is_allowed(self):
+        """Strict < means token_iat == changed_at_ts is allowed (not rejected)."""
+        import calendar
+        import os
+        from unittest.mock import patch
+        from app.core.auth import create_access_token, get_current_user_id
+
+        token = create_access_token({"sub": MOCK_USER_ID})
+        request = _make_request_with_token(token)
+
+        # Decode the token's iat and set changed_at to the exact same second
+        from jose import jwt
+        from app.core.config import config
+        payload = jwt.decode(token, config.jwt_secret_key, algorithms=["HS256"])
+        token_iat = payload["iat"]
+        # Convert iat (UTC epoch) back to a naive UTC datetime
+        from datetime import datetime as _dt
+        same_second = _dt.utcfromtimestamp(token_iat)
+
+        async def fake_get_password_changed_at(user_id):
+            return same_second
+
+        with patch.dict(os.environ, {"DEV_MODE": "false"}):
+            with patch("app.core.auth.get_password_changed_at", side_effect=fake_get_password_changed_at):
+                user_id = await get_current_user_id(request)
+        assert user_id == MOCK_USER_ID
+
 
 def _make_request_with_token(token: str):
     from unittest.mock import MagicMock
