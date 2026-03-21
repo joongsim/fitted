@@ -108,3 +108,22 @@ def test_reset_password_request_rejects_wrong_token_length():
     from pydantic import ValidationError
     with pytest.raises(ValidationError):
         ResetPasswordRequest(token="tooshort", new_password="password123")
+
+
+def test_reset_password_request_accepts_minimum_password_length():
+    from app.models.user import ResetPasswordRequest
+    req = ResetPasswordRequest(token="a" * 43, new_password="a" * 8)
+    assert len(req.new_password) == 8
+
+
+def test_reset_password_request_accepts_maximum_password_length():
+    from app.models.user import ResetPasswordRequest
+    req = ResetPasswordRequest(token="a" * 43, new_password="a" * 128)
+    assert len(req.new_password) == 128
+
+
+def test_reset_password_request_rejects_token_too_long():
+    from pydantic import ValidationError
+    from app.models.user import ResetPasswordRequest
+    with pytest.raises(ValidationError):
+        ResetPasswordRequest(token="a" * 44, new_password="validpassword123")

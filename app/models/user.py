@@ -38,8 +38,8 @@ class ResetPasswordRequest(BaseModel):
     @field_validator("token")
     @classmethod
     def token_must_be_43_chars(cls, v: str) -> str:
-        if len(v) != 43:
-            raise ValueError("token must be exactly 43 characters")
+        if len(v) != 43 or v != v.strip():
+            raise ValueError("token must be exactly 43 non-whitespace characters")
         return v
 
     @field_validator("new_password")
