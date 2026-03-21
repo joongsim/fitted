@@ -127,3 +127,34 @@ def test_reset_password_request_rejects_token_too_long():
     from app.models.user import ResetPasswordRequest
     with pytest.raises(ValidationError):
         ResetPasswordRequest(token="a" * 44, new_password="validpassword123")
+
+
+# --- hash_reset_token tests ---
+
+
+def test_hash_reset_token_returns_64_char_hex_string():
+    from app.core.auth import hash_reset_token
+    result = hash_reset_token("sometoken")
+    assert isinstance(result, str)
+    assert len(result) == 64
+    # Must be hex
+    int(result, 16)
+
+
+def test_hash_reset_token_same_input_same_output():
+    from app.core.auth import hash_reset_token
+    assert hash_reset_token("abc") == hash_reset_token("abc")
+
+
+def test_hash_reset_token_different_inputs_different_outputs():
+    from app.core.auth import hash_reset_token
+    assert hash_reset_token("token1") != hash_reset_token("token2")
+
+
+def test_create_access_token_includes_iat_claim():
+    from app.core.auth import create_access_token
+    from jose import jwt
+    token = create_access_token({"sub": "user-1"})
+    payload = jwt.decode(token, "dev-secret-key-change-me-in-prod", algorithms=["HS256"])
+    assert "iat" in payload
+    assert isinstance(payload["iat"], int)

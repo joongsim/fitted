@@ -1,5 +1,10 @@
+import calendar
+import hashlib
+import hmac
 import logging
 import os
+import secrets
+import time
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -27,6 +32,18 @@ def get_password_hash(password: str) -> str:
     return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
 
 
+def hash_reset_token(raw_token: str) -> str:
+    """
+    HMAC-SHA256 hash of a reset token keyed with the JWT secret.
+    Always returns a 64-character hex string. Never store the raw token.
+    """
+    return hmac.new(
+        config.jwt_secret_key.encode(),
+        raw_token.encode(),
+        hashlib.sha256,
+    ).hexdigest()
+
+
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     """
     Create a new JWT access token.
@@ -46,7 +63,10 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
             minutes=config.access_token_expire_minutes
         )
 
-    to_encode.update({"exp": expire})
+    to_encode.update({
+        "exp": expire,
+        "iat": int(time.time()),   # python-jose does not auto-include iat — must add explicitly
+    })
     encoded_jwt = jwt.encode(
         to_encode,
         config.jwt_secret_key,
