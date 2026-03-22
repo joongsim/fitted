@@ -290,7 +290,7 @@ async def refresh_token(request: Request, response: Response):
         samesite="lax",
         secure=False,
     )
-    logger.info("Token refreshed for user_id=%s", user_id)
+    logger.info("Token refreshed. cid=%s", _correlation_id.get())
     return {"access_token": new_token, "token_type": "bearer"}
 
 
