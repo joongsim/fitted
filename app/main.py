@@ -25,6 +25,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 import asyncio
+import json
 
 from typing import Annotated
 
@@ -1017,7 +1018,7 @@ async def log_interaction(
                     user_id,
                     body.item_id,
                     body.interaction_type,
-                    body.weather_context,
+                    json.dumps(body.weather_context),
                     body.query_text,
                 ),
             )
