@@ -1284,3 +1284,111 @@ class TestRecordPreferencePair:
                 headers=_auth_headers(),
             )
         assert response.status_code == 500
+
+
+# ---------------------------------------------------------------------------
+# POST /auth/refresh
+# ---------------------------------------------------------------------------
+
+
+class TestAuthRefresh:
+    def test_valid_token_returns_new_token_and_sets_cookie(self, client):
+        from app.core.auth import create_access_token
+        from app.core.config import config
+
+        token = create_access_token({"sub": MOCK_USER_ID})
+
+        with patch(
+            "app.main.user_service.get_user_by_id",
+            new_callable=AsyncMock,
+            return_value=MOCK_USER_OBJ,
+        ):
+            resp = client.post("/auth/refresh", cookies={"access_token": token})
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "access_token" in data
+        assert data["token_type"] == "bearer"
+        # Cookie must be (re)set
+        assert "access_token" in resp.cookies
+
+    def test_expired_token_returns_401(self, client):
+        from datetime import datetime, timedelta
+        from jose import jwt as _jwt
+
+        expired = _jwt.encode(
+            {"sub": MOCK_USER_ID, "exp": datetime.utcnow() - timedelta(hours=1)},
+            "dev-secret-key-change-me-in-prod",
+            algorithm="HS256",
+        )
+        resp = client.post("/auth/refresh", cookies={"access_token": expired})
+        assert resp.status_code == 401
+
+    def test_password_reset_invalidated_token_returns_401(self, client):
+        from datetime import datetime, timedelta
+        from jose import jwt as _jwt
+
+        token = _jwt.encode(
+            {
+                "sub": MOCK_USER_ID,
+                "exp": datetime.utcnow() + timedelta(hours=2),
+                "iat": 1000,   # issued at t=1000
+            },
+            "dev-secret-key-change-me-in-prod",
+            algorithm="HS256",
+        )
+        changed_at = datetime.utcfromtimestamp(2000)   # changed after token issued
+        # Note: the file-scoped autouse _patch_password_changed_at fixture returns None.
+        # The nested patch below is innermost and takes precedence over it during this test.
+
+        with patch(
+            "app.core.auth.get_password_changed_at",
+            new_callable=AsyncMock,
+            return_value=changed_at,
+        ):
+            with patch(
+                "app.main.user_service.get_user_by_id",
+                new_callable=AsyncMock,
+                return_value=MOCK_USER_OBJ,
+            ):
+                resp = client.post("/auth/refresh", cookies={"access_token": token})
+
+        assert resp.status_code == 401
+
+    def test_inactive_user_returns_401(self, client):
+        from app.core.auth import create_access_token
+        from unittest.mock import MagicMock
+
+        token = create_access_token({"sub": MOCK_USER_ID})
+        inactive_user = MagicMock()
+        inactive_user.is_active = False
+
+        with patch(
+            "app.main.user_service.get_user_by_id",
+            new_callable=AsyncMock,
+            return_value=inactive_user,
+        ):
+            resp = client.post("/auth/refresh", cookies={"access_token": token})
+
+        assert resp.status_code == 401
+
+    def test_missing_token_returns_401(self, client):
+        resp = client.post("/auth/refresh")
+        assert resp.status_code == 401
+
+    def test_bearer_header_accepted_when_no_cookie(self, client):
+        from app.core.auth import create_access_token
+
+        token = create_access_token({"sub": MOCK_USER_ID})
+
+        with patch(
+            "app.main.user_service.get_user_by_id",
+            new_callable=AsyncMock,
+            return_value=MOCK_USER_OBJ,
+        ):
+            resp = client.post(
+                "/auth/refresh",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+
+        assert resp.status_code == 200
