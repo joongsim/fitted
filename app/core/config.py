@@ -60,11 +60,14 @@ class Config:
                 logger.debug("Fetched SSM parameter: %s", parameter_name)
                 return response["Parameter"]["Value"]
             except Exception:
+                if default is not None:
+                    logger.warning(
+                        "SSM parameter not found, using default: %s", parameter_name
+                    )
+                    return default
                 logger.error(
                     "Failed to fetch SSM parameter: %s", parameter_name, exc_info=True
                 )
-                if default is not None:
-                    return default
                 raise
 
         # Local fallback: convert SSM path to env var name
