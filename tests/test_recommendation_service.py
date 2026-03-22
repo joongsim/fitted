@@ -195,7 +195,7 @@ class TestRank:
         item = _make_item("no-emb", embedding=None)
 
         with patch(
-            "app.services.embedding_service.encode_text", return_value=_UNIT_VEC.copy()
+            "app.services.domains.fashion.encode_text", return_value=_UNIT_VEC.copy()
         ):
             ranked = svc.rank(_UNIT_VEC, [item])
 

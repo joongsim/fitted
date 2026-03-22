@@ -113,8 +113,7 @@ def test_encode_text_uses_remote_when_env_var_set():
 
 def test_encode_text_uses_local_when_env_var_absent():
     """When EMBEDDING_SERVICE_URL is not set, encode_text should use local CLIP."""
-    env = {k: v for k, v in os.environ.items() if k != "EMBEDDING_SERVICE_URL"}
-    with patch.dict(os.environ, env, clear=True):
+    with patch("app.services.embedding_service._remote_url", return_value=None):
         with patch(
             "app.services.embedding_service._load_model_and_transform",
             return_value=(_make_mock_model(), _make_mock_tokenizer(), MagicMock()),
@@ -155,9 +154,12 @@ def test_encode_text_returns_float32():
     mock_model = MagicMock()
     mock_model.encode_text.return_value = torch.ones(1, 512, dtype=torch.float64)
 
-    with patch(
-        "app.services.embedding_service._load_model_and_transform",
-        return_value=(mock_model, _make_mock_tokenizer(), MagicMock()),
+    with (
+        patch("app.services.embedding_service._remote_url", return_value=None),
+        patch(
+            "app.services.embedding_service._load_model_and_transform",
+            return_value=(mock_model, _make_mock_tokenizer(), MagicMock()),
+        ),
     ):
         from app.services.embedding_service import encode_text
 
@@ -180,9 +182,12 @@ def test_load_model_called_only_once_across_multiple_encodes():
         call_count["n"] += 1
         return mock_triple
 
-    with patch(
-        "app.services.embedding_service._load_model_and_transform",
-        side_effect=_counting_load,
+    with (
+        patch("app.services.embedding_service._remote_url", return_value=None),
+        patch(
+            "app.services.embedding_service._load_model_and_transform",
+            side_effect=_counting_load,
+        ),
     ):
         from app.services.embedding_service import encode_text
 
@@ -212,9 +217,12 @@ def test_singleton_reused_after_first_load():
     """After the first encode_text call, _model should be non-None."""
     import app.services.embedding_service as svc
 
-    with patch(
-        "app.services.embedding_service._load_model_and_transform",
-        return_value=(_make_mock_model(), _make_mock_tokenizer(), MagicMock()),
+    with (
+        patch("app.services.embedding_service._remote_url", return_value=None),
+        patch(
+            "app.services.embedding_service._load_model_and_transform",
+            return_value=(_make_mock_model(), _make_mock_tokenizer(), MagicMock()),
+        ),
     ):
         from app.services.embedding_service import encode_text
 
@@ -260,6 +268,7 @@ def test_encode_image_url_returns_512_dim_unit_vector():
     mock_response.raise_for_status = MagicMock()
 
     with (
+        patch("app.services.embedding_service._remote_url", return_value=None),
         patch(
             "app.services.embedding_service._load_model_and_transform",
             return_value=(mock_model, _make_mock_tokenizer(), mock_transform),
@@ -287,6 +296,7 @@ def test_encode_image_s3_key_fetches_from_s3():
     mock_s3_client.get_object.return_value = {"Body": mock_body}
 
     with (
+        patch("app.services.embedding_service._remote_url", return_value=None),
         patch(
             "app.services.embedding_service._load_model_and_transform",
             return_value=(mock_model, _make_mock_tokenizer(), mock_transform),
@@ -316,6 +326,7 @@ def test_encode_image_url_is_l2_normalized():
     mock_response.raise_for_status = MagicMock()
 
     with (
+        patch("app.services.embedding_service._remote_url", return_value=None),
         patch(
             "app.services.embedding_service._load_model_and_transform",
             return_value=(mock_model, _make_mock_tokenizer(), mock_transform),
