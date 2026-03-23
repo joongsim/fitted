@@ -190,11 +190,13 @@ class RecommendationService:
 
         for (emb_raw,) in rows:
             if emb_raw is not None:
-                vec = (
-                    emb_raw
-                    if isinstance(emb_raw, np.ndarray)
-                    else np.array(emb_raw, dtype=np.float32)
-                )
+                if isinstance(emb_raw, np.ndarray):
+                    vec = emb_raw
+                elif isinstance(emb_raw, str):
+                    import json
+                    vec = np.array(json.loads(emb_raw), dtype=np.float32)
+                else:
+                    vec = np.array(emb_raw, dtype=np.float32)
                 if vec.shape == (_EMBED_DIM,):
                     wardrobe_embeddings.append(vec)
 
