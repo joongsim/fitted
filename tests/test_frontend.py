@@ -78,13 +78,22 @@ def client(app):
 @pytest.fixture
 def authed_client(app):
     """Authenticated test client — session contains an access_token."""
+    import time
+    from jose import jwt as _jwt
+
+    # Use a real JWT with a far-future expiry so the beforeware doesn't
+    # attempt a refresh or redirect during tests that don't need to test that.
+    token = _jwt.encode(
+        {"sub": "test-user", "exp": int(time.time()) + 7200, "iat": int(time.time())},
+        "any-secret",
+        algorithm="HS256",
+    )
     tc = TestClient(app, raise_server_exceptions=False, follow_redirects=False)
-    # Inject a fake token into the session via the login endpoint
     with patch("httpx.AsyncClient") as mock_http:
         mock_instance = AsyncMock()
         mock_http.return_value.__aenter__.return_value = mock_instance
         mock_instance.post.return_value = _make_http_response(
-            200, {"access_token": "fake-jwt-token"}
+            200, {"access_token": token}
         )
         tc.post("/login", data={"username": "user@example.com", "password": "pw"})
     return tc
@@ -566,3 +575,148 @@ class TestGetRecommendations:
         assert response.status_code == 200
         # White Oxford Shirt has no image_url — placeholder div should appear
         assert b"product-card-placeholder" in response.content
+
+
+# ---------------------------------------------------------------------------
+# Helpers for beforeware tests
+# ---------------------------------------------------------------------------
+
+
+def _make_jwt_with_exp(exp_offset_seconds: int) -> str:
+    """Return a signed JWT whose exp is now + exp_offset_seconds."""
+    import time
+    from jose import jwt as _jwt
+
+    payload = {
+        "sub": "test-user-uuid",
+        "exp": int(time.time()) + exp_offset_seconds,
+        "iat": int(time.time()),
+    }
+    # The beforeware only base64-decodes exp — it does NOT verify the signature.
+    return _jwt.encode(payload, "any-secret", algorithm="HS256")
+
+
+def _make_authed_client_with_token(app, token: str):
+    """Return a TestClient whose session contains the given access_token."""
+    tc = TestClient(app, raise_server_exceptions=False, follow_redirects=False)
+    with patch("httpx.AsyncClient") as mock_http:
+        mock_instance = AsyncMock()
+        mock_http.return_value.__aenter__.return_value = mock_instance
+        mock_instance.post.return_value = _make_http_response(
+            200, {"access_token": token}
+        )
+        tc.post("/login", data={"username": "u@example.com", "password": "pw"})
+    return tc
+
+
+# ---------------------------------------------------------------------------
+# Beforeware: refresh_token_if_needed
+# ---------------------------------------------------------------------------
+
+
+class TestRefreshTokenBeforeware:
+    def test_token_far_from_expiry_is_not_refreshed(self, app):
+        """Token with >60 min remaining — no refresh call should be made."""
+        token = _make_jwt_with_exp(7200)  # 2 hours out
+        tc = _make_authed_client_with_token(app, token)
+
+        with patch("httpx.AsyncClient") as mock_http:
+            mock_instance = AsyncMock()
+            mock_http.return_value.__aenter__.return_value = mock_instance
+            tc.get("/wardrobe")
+
+        mock_instance.post.assert_not_called()
+
+    def test_token_near_expiry_triggers_refresh_and_updates_session(self, app):
+        """Token with <60 min remaining — refresh endpoint is called."""
+        token = _make_jwt_with_exp(1800)  # 30 min out
+        new_token = _make_jwt_with_exp(86400)
+        tc = _make_authed_client_with_token(app, token)
+
+        with patch("httpx.AsyncClient") as mock_http:
+            mock_instance = AsyncMock()
+            mock_http.return_value.__aenter__.return_value = mock_instance
+            mock_instance.post.return_value = _make_http_response(
+                200, {"access_token": new_token}
+            )
+            resp = tc.get("/wardrobe")
+
+        mock_instance.post.assert_called_once()
+        call_url = mock_instance.post.call_args[0][0]
+        assert "/auth/refresh" in call_url
+
+    def test_already_expired_token_clears_session_and_redirects(self, app):
+        """Token already past exp — redirect to /login, no refresh attempt."""
+        token = _make_jwt_with_exp(-3600)  # expired 1 hour ago
+        tc = _make_authed_client_with_token(app, token)
+
+        with patch("httpx.AsyncClient") as mock_http:
+            mock_instance = AsyncMock()
+            mock_http.return_value.__aenter__.return_value = mock_instance
+            resp = tc.get("/wardrobe")
+
+        mock_instance.post.assert_not_called()
+        assert resp.status_code in (302, 303)
+        assert "/login" in resp.headers.get("location", "")
+
+    def test_expired_token_htmx_request_returns_hx_redirect(self, app):
+        """Expired token on an HTMX partial — HX-Redirect header, not 3xx."""
+        token = _make_jwt_with_exp(-3600)
+        tc = _make_authed_client_with_token(app, token)
+
+        with patch("httpx.AsyncClient") as mock_http:
+            mock_instance = AsyncMock()
+            mock_http.return_value.__aenter__.return_value = mock_instance
+            resp = tc.post(
+                "/get-recommendations",
+                data={"location": "London"},
+                headers={"HX-Request": "true"},
+            )
+
+        assert resp.status_code == 200
+        assert resp.headers.get("HX-Redirect") == "/login"
+
+    def test_refresh_returns_401_clears_session_and_redirects(self, app):
+        """Near-expiry token + backend returns 401 — redirect to /login."""
+        token = _make_jwt_with_exp(1800)
+        tc = _make_authed_client_with_token(app, token)
+
+        with patch("httpx.AsyncClient") as mock_http:
+            mock_instance = AsyncMock()
+            mock_http.return_value.__aenter__.return_value = mock_instance
+            mock_instance.post.return_value = _make_http_response(401, {"detail": "Token invalidated"})
+            resp = tc.get("/wardrobe")
+
+        assert resp.status_code in (302, 303)
+        assert "/login" in resp.headers.get("location", "")
+
+    def test_backend_unreachable_during_refresh_proceeds_with_old_token(self, app):
+        """Backend down during refresh — request continues, no redirect."""
+        import httpx as _httpx
+
+        token = _make_jwt_with_exp(1800)
+        tc = _make_authed_client_with_token(app, token)
+
+        with patch("httpx.AsyncClient") as mock_http:
+            mock_instance = AsyncMock()
+            mock_http.return_value.__aenter__.return_value = mock_instance
+            mock_instance.post.side_effect = _httpx.ConnectError("refused")
+            resp = tc.get("/")
+
+        # Home page is accessible without auth, so we get 200 not a redirect
+        assert resp.status_code == 200
+
+    def test_malformed_jwt_clears_session_and_redirects(self, app):
+        """Corrupted token in session — treated as expired, redirect to /login."""
+        tc = TestClient(app, raise_server_exceptions=False, follow_redirects=False)
+        with patch("httpx.AsyncClient") as mock_http:
+            mock_instance = AsyncMock()
+            mock_http.return_value.__aenter__.return_value = mock_instance
+            mock_instance.post.return_value = _make_http_response(
+                200, {"access_token": "bad.token"}
+            )
+            tc.post("/login", data={"username": "u@example.com", "password": "pw"})
+
+        resp = tc.get("/wardrobe")
+        assert resp.status_code in (302, 303)
+        assert "/login" in resp.headers.get("location", "")

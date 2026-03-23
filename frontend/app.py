@@ -1,7 +1,10 @@
 """FastHTML frontend for Fitted - AI Weather Stylist"""
 
 # ruff: noqa: F405
+import base64
+import json
 import logging
+import time
 
 import boto3
 import httpx
@@ -560,6 +563,71 @@ SESSION_SECRET = get_ssm_parameter(
     os.environ.get("SESSION_SECRET", "local-dev-secret-key-change-in-prod"),
 )
 
+def _decode_jwt_exp(token: str):
+    """Return the exp claim from a JWT payload without verifying the signature."""
+    try:
+        segments = token.split(".")
+        if len(segments) != 3:
+            return None
+        payload_b64 = segments[1]
+        payload_b64 += "=" * (4 - len(payload_b64) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(payload_b64))
+        return payload.get("exp")
+    except Exception:
+        return None
+
+
+def _login_redirect(req):
+    """Return an HTMX-aware redirect to /login."""
+    if req.headers.get("HX-Request") == "true":
+        from starlette.responses import Response as _Response
+        r = _Response(status_code=200)
+        r.headers["HX-Redirect"] = "/login"
+        return r
+    return RedirectResponse("/login", status_code=303)
+
+
+async def refresh_token_if_needed(req, session):
+    """
+    Beforeware: silently refresh JWTs within 60 minutes of expiry.
+    Redirects to /login if the token is expired or refresh fails.
+    """
+    token = session.get("access_token")
+    if not token:
+        return  # unauthenticated request — nothing to do
+
+    exp = _decode_jwt_exp(token)
+    if exp is None:
+        # Malformed token
+        session.pop("access_token", None)
+        return _login_redirect(req)
+
+    now = int(time.time())
+    if exp <= now:
+        # Already expired
+        session.pop("access_token", None)
+        return _login_redirect(req)
+
+    if exp - now > 3600:
+        return  # >60 minutes remaining — no action needed
+
+    # ≤60 minutes remaining — attempt proactive refresh
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                f"{API_BASE_URL}/auth/refresh",
+                cookies={"access_token": token},
+                timeout=3.0,
+            )
+        if resp.status_code == 200:
+            session["access_token"] = resp.json()["access_token"]
+        else:
+            session.pop("access_token", None)
+            return _login_redirect(req)
+    except (httpx.ConnectError, httpx.TimeoutException) as exc:
+        logger.warning("Token refresh skipped — backend unreachable: %s", exc)
+
+
 AppClass = (
     FastHTMLWithLiveReload
     if os.environ.get("DEV", "false").lower() == "true"
@@ -567,6 +635,10 @@ AppClass = (
 )
 app = AppClass(
     secret_key=SESSION_SECRET,
+    before=Beforeware(
+        refresh_token_if_needed,
+        skip=[r"/login", r"/register", r"/logout", r"/reset-password.*", r"/forgot-password"],
+    ),
     hdrs=(
         Link(
             rel="stylesheet",

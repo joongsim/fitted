@@ -1,4 +1,5 @@
 # app/main.py
+import calendar
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -6,6 +7,8 @@ import boto3
 import os
 import logging
 from contextlib import asynccontextmanager
+
+from jose import JWTError, jwt
 
 from fastapi import (
     FastAPI,
@@ -214,6 +217,81 @@ async def logout(response: Response):
     """Logout user by clearing the auth cookie."""
     response.delete_cookie("access_token")
     return {"message": "Successfully logged out"}
+
+
+@app.post("/auth/refresh", response_model=Token)
+async def refresh_token(request: Request, response: Response):
+    """
+    Issue a new access token if the current one is still valid.
+    Accepts the token from the access_token cookie (preferred) or Authorization header.
+    Returns 401 if the token is expired, invalid, or the user is inactive.
+    """
+    # 1. Extract token — cookie takes precedence
+    token = request.cookies.get("access_token")
+    if not token:
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            token = auth_header.split(" ")[1]
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    # 2. Decode and verify (jose raises JWTError if expired)
+    try:
+        payload = jwt.decode(
+            token,
+            config.jwt_secret_key,
+            algorithms=[config.jwt_algorithm],
+        )
+    except JWTError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    user_id: str = payload.get("sub")
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token: missing sub",
+        )
+
+    # 3. Reject tokens issued before a password reset
+    token_iat: int = payload.get("iat", 0)
+    password_changed_at = await auth.get_password_changed_at(user_id)
+    if password_changed_at is not None:
+        changed_at_ts = calendar.timegm(password_changed_at.utctimetuple())
+        if token_iat < changed_at_ts:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token invalidated. Please log in again.",
+            )
+
+    # 4. Confirm user is still active
+    user = await user_service.get_user_by_id(user_id)
+    if not user or not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found or inactive",
+        )
+
+    # 5. Issue fresh token and set cookie
+    new_token = auth.create_access_token(data={"sub": user_id})
+    response.set_cookie(
+        key="access_token",
+        value=new_token,
+        httponly=True,
+        max_age=config.access_token_expire_minutes * 60,
+        expires=config.access_token_expire_minutes * 60,
+        samesite="lax",
+        secure=False,
+    )
+    logger.info("Token refreshed. cid=%s", _correlation_id.get())
+    return {"access_token": new_token, "token_type": "bearer"}
 
 
 @app.post("/auth/forgot-password")
