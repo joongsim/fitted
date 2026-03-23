@@ -1473,7 +1473,7 @@ async def preferences_page(session):
                 f"{API_BASE_URL}/users/me/preferences", headers=headers, timeout=10.0
             )
             if resp.status_code == 200:
-                style_prefs = resp.json().get("style_preferences", {})
+                style_prefs = resp.json().get("style_preferences") or {}
     except Exception:
         logger.error("Failed to fetch preferences.", exc_info=True)
 
@@ -1569,7 +1569,7 @@ async def save_preferences(
         async with httpx.AsyncClient() as client:
             resp = await client.patch(
                 f"{API_BASE_URL}/users/me/preferences",
-                json={"style_preferences": style_prefs},
+                json={"style_prefs": style_prefs},
                 headers=headers,
                 timeout=10.0,
             )
