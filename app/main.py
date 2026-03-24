@@ -36,6 +36,7 @@ from pydantic import BaseModel, Field
 from pydantic import StringConstraints
 from app.services import weather_service
 from app.services import llm_service
+from app.services import wardrobe_service
 from app.core.config import config
 from app.services import analysis_service
 from app.services import user_service
@@ -867,7 +868,6 @@ async def list_wardrobe(
 
     Each item includes a presigned S3 URL (1 h expiry) when an image exists.
     """
-    from app.services import wardrobe_service
     from app.services.storage_service import get_image_presigned_url
     from app.models.wardrobe import WardrobeItemResponse
 
@@ -885,6 +885,7 @@ async def list_wardrobe(
                 image_url=image_url,
                 tags=item["tags"],
                 created_at=item["created_at"],
+                embedding_status=item["embedding_status"],
             ).model_dump()
         )
 
@@ -907,7 +908,6 @@ async def add_wardrobe_item(
     ``wardrobe-images/{user_id}/{item_id}.jpg``; the S3 key is stored on the row.
     The CLIP embedding column is NULL until the wardrobe backfill script runs.
     """
-    from app.services import wardrobe_service
     from app.services.storage_service import (
         upload_wardrobe_image,
         get_image_presigned_url,
@@ -946,28 +946,9 @@ async def add_wardrobe_item(
 
     if image_s3_key:
         import asyncio
-
-        async def _embed_wardrobe_image(item_id: str, s3_key: str) -> None:
-            try:
-                from app.services.embedding_service import encode_image
-
-                vec = encode_image(s3_key)
-                async with db_service.get_connection() as conn:
-                    async with conn.cursor() as cur:
-                        await cur.execute(
-                            "UPDATE wardrobe_items SET embedding = %s::vector WHERE item_id = %s",
-                            (vec.tolist(), item_id),
-                        )
-                        await conn.commit()
-                logger.info("Wardrobe image embedded: item_id=%s", item_id)
-            except Exception:
-                logger.error(
-                    "Failed to embed wardrobe image: item_id=%s",
-                    item_id,
-                    exc_info=True,
-                )
-
-        asyncio.create_task(_embed_wardrobe_image(item["item_id"], image_s3_key))
+        asyncio.create_task(
+            wardrobe_service.embed_wardrobe_item(item["item_id"], image_s3_key)
+        )
 
     image_url = get_image_presigned_url(image_s3_key) if image_s3_key else None
     return WardrobeItemResponse(
@@ -977,6 +958,7 @@ async def add_wardrobe_item(
         image_url=image_url,
         tags=item["tags"],
         created_at=item["created_at"],
+        embedding_status=item["embedding_status"],
     ).model_dump()
 
 
@@ -991,8 +973,6 @@ async def delete_wardrobe_item(
     Ownership is enforced: users can only delete their own items.  Returns 404
     when the item does not exist or belongs to a different user.
     """
-    from app.services import wardrobe_service
-
     deleted = await wardrobe_service.delete_wardrobe_item(
         user_id=user_id, item_id=item_id
     )
@@ -1017,7 +997,6 @@ async def update_wardrobe_item_endpoint(
     Ownership is enforced: 404 when the item doesn't exist or belongs to a
     different user.
     """
-    from app.services import wardrobe_service
     from app.services.storage_service import get_image_presigned_url
     from app.models.wardrobe import WardrobeItemResponse
 
@@ -1059,7 +1038,45 @@ async def update_wardrobe_item_endpoint(
         image_url=image_url,
         tags=item["tags"],
         created_at=item["created_at"],
+        embedding_status=item["embedding_status"],
     ).model_dump()
+
+
+@app.get("/wardrobe/{item_id}/status")
+async def get_wardrobe_item_status(
+    item_id: str,
+    request: Request,
+    user_id: str = Depends(auth.get_current_user_id),
+):
+    """
+    Return embedding_status for a wardrobe item.
+
+    When called from HTMX (HX-Request header present), returns an HTML badge
+    partial instead of JSON. Polling stops automatically when the badge for
+    terminal states (done/failed) omits hx-trigger.
+    """
+    from app.models.wardrobe import WardrobeItemStatusResponse
+    from fastapi.responses import HTMLResponse
+
+    status = await wardrobe_service.get_wardrobe_item_status(user_id, item_id)
+    if status is None:
+        raise HTTPException(status_code=404, detail="Wardrobe item not found")
+
+    if request.headers.get("HX-Request"):
+        if status in ("pending", "embedding"):
+            html = (
+                f'<span id="embed-status-{item_id}" '
+                f'hx-get="/wardrobe/{item_id}/status" '
+                f'hx-trigger="every 2s" hx-target="this" hx-swap="outerHTML" '
+                f'class="badge badge-pending">⏳ {status}</span>'
+            )
+        elif status == "done":
+            html = f'<span id="embed-status-{item_id}" class="badge badge-done">✓ ready</span>'
+        else:
+            html = f'<span id="embed-status-{item_id}" class="badge badge-failed">✗ failed</span>'
+        return HTMLResponse(content=html)
+
+    return WardrobeItemStatusResponse(item_id=item_id, embedding_status=status)
 
 
 # --- Interaction Logging Endpoints ---
