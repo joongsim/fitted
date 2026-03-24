@@ -68,7 +68,7 @@ custom_css = Style(
         margin-bottom: 1.5rem;
     }
     .nav-bar a { text-decoration: none; color: #000; font-weight: bold; }
-    .nav-bar a.active { color: #16a34a; }
+    .nav-bar a.active { color: #95FB62; }
 
     .container {
         max-width: 450px;
@@ -145,7 +145,7 @@ custom_css = Style(
         background-color: #ffffff;
         border: 2px solid #000000;
         border-radius: 0;
-        color: #16a34a;
+        color: #000000;
         box-shadow: none;
     }
     .weather-main {
@@ -266,7 +266,7 @@ custom_css = Style(
         display: inline-block;
         width: 1rem;
         height: 1rem;
-        border: 2px solid #16a34a;
+        border: 2px solid #95FB62;
         border-radius: 50%;
         border-top-color: transparent;
         animation: spin 0.8s linear infinite;
@@ -432,7 +432,7 @@ custom_css = Style(
     }
     .product-card-price {
         font-size: 0.875rem;
-        color: #16a34a;
+        color: #000000;
         font-weight: bold;
         margin-bottom: 0.5rem;
     }
@@ -459,7 +459,7 @@ custom_css = Style(
         cursor: pointer;
         font-size: 0.8rem;
     }
-    .product-card-action-btn:hover { background-color: #f1f5f9; }
+    .product-card-action-btn:hover { background-color: #000; color: #95FB62; }
 
     /* Product Grid & Shop Section */
     .product-grid {
@@ -554,7 +554,7 @@ custom_css = Style(
         margin-top: 1rem;
         font-size: 0.875rem;
     }
-    .auth-link a { color: #16a34a; font-weight: bold; }
+    .auth-link a { color: #000000; font-weight: bold; }
 
     .filter-bar { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1rem; }
     .filter-btn { padding: 0.35rem 0.85rem; border-radius: 0; border: 2px solid #000; background: #fff; color: #000; cursor: pointer; font-size: 0.85rem; font-weight: bold; }
