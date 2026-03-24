@@ -159,7 +159,7 @@ custom_css = Style(
         font-weight: bold;
         margin: 0;
         line-height: 1;
-        color: var(--pico-primary);
+        color: #95FB62;
     }
     
     .weather-condition {
@@ -266,7 +266,7 @@ custom_css = Style(
         display: inline-block;
         width: 1rem;
         height: 1rem;
-        border: 2px solid #95FB62;
+        border: 2px solid #ffffff;
         border-radius: 50%;
         border-top-color: transparent;
         animation: spin 0.8s linear infinite;
@@ -311,6 +311,10 @@ custom_css = Style(
         color: #000;
         font-weight: bold;
         cursor: pointer;
+    }
+    .wardrobe-upload-form button:hover {
+        background-color: #000;
+        color: #95FB62;
     }
     .wardrobe-grid {
         display: grid;
@@ -520,6 +524,10 @@ custom_css = Style(
         font-weight: bold;
         cursor: pointer;
     }
+    .prefs-form button:hover {
+        background-color: #000;
+        color: #95FB62;
+    }
     .prefs-hint {
         font-size: 0.75rem;
         color: #64748b;
@@ -548,6 +556,10 @@ custom_css = Style(
         border: 2px solid #000;
         color: #000;
         font-weight: bold;
+    }
+    .auth-form button:hover {
+        background-color: #000;
+        color: #95FB62;
     }
     .auth-link {
         text-align: center;
