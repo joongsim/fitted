@@ -15,6 +15,7 @@ CLAUDE.md
 archive/
 plans/
 !docs/superpowers/plans/
+!docs/superpowers/specs/
 notebooks/
 
 # Byte-compiled / optimized / DLL files
