@@ -1382,6 +1382,27 @@ async def wardrobe_delete(item_id: str, session):
     return ""  # HTMX replaces the card element with nothing
 
 
+@app.get("/wardrobe/{item_id}/status")
+async def wardrobe_item_status(item_id: str, session):
+    """HTMX fragment: proxy embedding status badge from backend."""
+    if "access_token" not in session:
+        return ""
+    token = session["access_token"]
+    headers = {"Authorization": f"Bearer {token}", "HX-Request": "true"}
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f"{API_BASE_URL}/wardrobe/{item_id}/status",
+                headers=headers,
+                timeout=5.0,
+            )
+            if resp.status_code == 200:
+                return NotStr(resp.text)
+    except Exception:
+        logger.error("Status poll failed for item_id=%s", item_id, exc_info=True)
+    return ""
+
+
 # --- Interaction Logging (fire-and-forget from product cards) ---
 
 
