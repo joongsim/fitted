@@ -1,6 +1,7 @@
 """Dev catalog candidate source — pgvector ANN search on catalog_items."""
 
 import logging
+from typing import Optional
 
 import numpy as np
 
@@ -14,6 +15,7 @@ async def search(
     query_embedding: np.ndarray,
     limit: int = 50,
     domain: str = "fashion",
+    category_filter: Optional[str] = None,
 ) -> list[Item]:
     """
     Retrieve candidate Items from catalog_items via pgvector ANN search.
@@ -29,6 +31,8 @@ async def search(
         query_embedding: 512-dim L2-normalized query vector.
         limit: Maximum candidates to return.
         domain: Domain filter ('fashion', 'furniture', ...).
+        category_filter: Optional substring to match against
+            ``attributes->>'category'`` via ILIKE (e.g. "tops", "bottoms").
 
     Returns:
         List of Item objects. Order is by cosine similarity when embeddings
@@ -39,19 +43,35 @@ async def search(
     async with get_connection() as conn:
         async with conn.cursor() as cur:
             # Primary: vector search on rows that have been embedded
-            await cur.execute(
-                """
-                SELECT item_id, domain, title, price, image_url, product_url,
-                       source, embedding, attributes,
-                       (embedding <=> %s::vector) AS cosine_distance
-                FROM catalog_items
-                WHERE domain = %s
-                  AND embedding IS NOT NULL
-                ORDER BY cosine_distance
-                LIMIT %s
-                """,
-                (embedding_list, domain, limit),
-            )
+            if category_filter:
+                await cur.execute(
+                    """
+                    SELECT item_id, domain, title, price, image_url, product_url,
+                           source, embedding, attributes,
+                           (embedding <=> %s::vector) AS cosine_distance
+                    FROM catalog_items
+                    WHERE domain = %s
+                      AND embedding IS NOT NULL
+                      AND attributes->>'category' ILIKE %s
+                    ORDER BY cosine_distance
+                    LIMIT %s
+                    """,
+                    (embedding_list, domain, f"%{category_filter}%", limit),
+                )
+            else:
+                await cur.execute(
+                    """
+                    SELECT item_id, domain, title, price, image_url, product_url,
+                           source, embedding, attributes,
+                           (embedding <=> %s::vector) AS cosine_distance
+                    FROM catalog_items
+                    WHERE domain = %s
+                      AND embedding IS NOT NULL
+                    ORDER BY cosine_distance
+                    LIMIT %s
+                    """,
+                    (embedding_list, domain, limit),
+                )
             rows = await cur.fetchall()
 
             if not rows:
@@ -59,17 +79,31 @@ async def search(
                     "No embedded catalog items for domain=%s — falling back to recency",
                     domain,
                 )
-                await cur.execute(
-                    """
-                    SELECT item_id, domain, title, price, image_url, product_url,
-                           source, embedding, attributes, NULL AS cosine_distance
-                    FROM catalog_items
-                    WHERE domain = %s
-                    ORDER BY last_seen DESC
-                    LIMIT %s
-                    """,
-                    (domain, limit),
-                )
+                if category_filter:
+                    await cur.execute(
+                        """
+                        SELECT item_id, domain, title, price, image_url, product_url,
+                               source, embedding, attributes, NULL AS cosine_distance
+                        FROM catalog_items
+                        WHERE domain = %s
+                          AND attributes->>'category' ILIKE %s
+                        ORDER BY last_seen DESC
+                        LIMIT %s
+                        """,
+                        (domain, f"%{category_filter}%", limit),
+                    )
+                else:
+                    await cur.execute(
+                        """
+                        SELECT item_id, domain, title, price, image_url, product_url,
+                               source, embedding, attributes, NULL AS cosine_distance
+                        FROM catalog_items
+                        WHERE domain = %s
+                        ORDER BY last_seen DESC
+                        LIMIT %s
+                        """,
+                        (domain, limit),
+                    )
                 rows = await cur.fetchall()
 
     items = []

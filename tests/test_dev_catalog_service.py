@@ -288,3 +288,74 @@ class TestCandidateSource:
             await get_candidates(_UNIT_VEC)
 
         mock_search.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# dev_catalog_service.search — category filter
+# ---------------------------------------------------------------------------
+
+
+class TestDevCatalogCategoryFilter:
+    async def test_category_filter_adds_ilike_to_primary_query(self):
+        """When category_filter is set, SQL must contain ILIKE."""
+        mock_conn, mock_cur = _make_mock_conn(fetchall_return=[_catalog_row()])
+
+        with _patch_conn(mock_conn):
+            from app.services.dev_catalog_service import search
+            await search(_UNIT_VEC, category_filter="tops")
+
+        sql, params = mock_cur.execute.call_args_list[0][0]
+        assert "ilike" in sql.lower()
+        assert "%tops%" in params
+
+    async def test_category_filter_pattern_is_wrapped_in_percent(self):
+        """Bound parameter must be '%<value>%', not just '<value>'."""
+        mock_conn, mock_cur = _make_mock_conn(fetchall_return=[_catalog_row()])
+
+        with _patch_conn(mock_conn):
+            from app.services.dev_catalog_service import search
+            await search(_UNIT_VEC, category_filter="shoes")
+
+        _, params = mock_cur.execute.call_args_list[0][0]
+        assert "%shoes%" in params
+
+    async def test_no_category_filter_omits_ilike(self):
+        """Without category_filter, SQL must not contain ILIKE."""
+        mock_conn, mock_cur = _make_mock_conn(fetchall_return=[_catalog_row()])
+
+        with _patch_conn(mock_conn):
+            from app.services.dev_catalog_service import search
+            await search(_UNIT_VEC)
+
+        sql, _ = mock_cur.execute.call_args_list[0][0]
+        assert "ilike" not in sql.lower()
+
+    async def test_category_filter_applied_to_fallback_query(self):
+        """Fallback recency query must also carry the ILIKE filter."""
+        mock_conn, mock_cur = _make_mock_conn()
+        fallback_row = _catalog_row(item_id="fb", cosine_distance=None)
+        mock_cur.fetchall = AsyncMock(side_effect=[[], [fallback_row]])
+
+        with _patch_conn(mock_conn):
+            from app.services.dev_catalog_service import search
+            await search(_UNIT_VEC, category_filter="bottoms")
+
+        assert mock_cur.execute.call_count == 2
+        fallback_sql, fallback_params = mock_cur.execute.call_args_list[1][0]
+        assert "ilike" in fallback_sql.lower()
+        assert "%bottoms%" in fallback_params
+
+    async def test_primary_query_param_order_with_filter(self):
+        """Primary query params must be (embedding, domain, pattern, limit)."""
+        mock_conn, mock_cur = _make_mock_conn(fetchall_return=[_catalog_row()])
+
+        with _patch_conn(mock_conn):
+            from app.services.dev_catalog_service import search
+            await search(_UNIT_VEC, domain="fashion", limit=50, category_filter="tops")
+
+        _, params = mock_cur.execute.call_args_list[0][0]
+        # params[0] = embedding list, params[1] = domain, params[2] = pattern, params[3] = limit
+        assert isinstance(params[0], list)
+        assert params[1] == "fashion"
+        assert params[2] == "%tops%"
+        assert params[3] == 50
