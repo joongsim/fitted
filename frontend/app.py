@@ -329,20 +329,20 @@ custom_css = Style(
         aspect-ratio: 1;
         object-fit: cover;
         display: block;
-        background-color: #f1f5f9;
-        border: 1px solid #e2e8f0;
+        background-color: #fffbeb;
+        border: none;
         margin-bottom: 0.5rem;
     }
     .wardrobe-card-placeholder {
         width: 100%;
         aspect-ratio: 1;
-        background-color: #f1f5f9;
+        background-color: #fffbeb;
         display: flex;
         align-items: center;
         justify-content: center;
         font-size: 2rem;
         margin-bottom: 0.5rem;
-        border: 1px solid #e2e8f0;
+        border: none;
     }
     .wardrobe-card-name {
         font-weight: bold;
@@ -408,13 +408,13 @@ custom_css = Style(
         aspect-ratio: 1;
         object-fit: cover;
         display: block;
-        background-color: #f1f5f9;
+        background-color: #fffbeb;
         margin-bottom: 0.5rem;
     }
     .product-card-placeholder {
         width: 100%;
         aspect-ratio: 1;
-        background-color: #f1f5f9;
+        background-color: #fffbeb;
         display: flex;
         align-items: center;
         justify-content: center;
