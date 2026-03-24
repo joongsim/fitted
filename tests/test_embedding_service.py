@@ -296,6 +296,7 @@ def test_encode_image_s3_key_fetches_from_s3():
     mock_s3_client.get_object.return_value = {"Body": mock_body}
 
     with (
+        patch.dict(os.environ, {"S3_BUCKET": "fitted-app-bucket"}),
         patch("app.services.embedding_service._remote_url", return_value=None),
         patch(
             "app.services.embedding_service._load_model_and_transform",
@@ -353,7 +354,7 @@ def test_encode_image_s3_key_sends_bytes_to_remote():
     mock_body.read.return_value = fake_jpeg
     mock_s3_client.get_object.return_value = {"Body": mock_body}
 
-    with patch.dict(os.environ, {"EMBEDDING_SERVICE_URL": "http://localhost:8001"}):
+    with patch.dict(os.environ, {"EMBEDDING_SERVICE_URL": "http://localhost:8001", "S3_BUCKET": "fitted-app-bucket"}):
         with patch("boto3.client", return_value=mock_s3_client):
             with patch("httpx.post", return_value=mock_httpx_response) as mock_post:
                 result = embedding_service.encode_image("wardrobe-images/user/item.jpg")
@@ -363,3 +364,44 @@ def test_encode_image_s3_key_sends_bytes_to_remote():
     assert "/embed/image" in mock_post.call_args.args[0]
     assert result.shape == (512,)
     assert result.dtype == np.float32
+
+
+def test_encode_image_uses_app_bucket_not_weather_bucket():
+    """encode_image must fetch from the app S3 bucket, not the weather cache bucket."""
+    from PIL import Image
+
+    # Build a minimal 224x224 RGB image in memory
+    buf = io.BytesIO()
+    Image.new("RGB", (224, 224)).save(buf, format="JPEG")
+    image_bytes = buf.getvalue()
+
+    mock_s3 = MagicMock()
+    mock_s3.get_object.return_value = {"Body": MagicMock(read=lambda: image_bytes)}
+
+    # Fake encode to avoid loading actual CLIP model
+    fake_vec = np.ones(512, dtype=np.float32)
+    fake_vec /= np.linalg.norm(fake_vec)
+
+    with patch("boto3.client", return_value=mock_s3), \
+         patch("app.services.embedding_service._load_model_and_transform") as mock_load, \
+         patch("torch.no_grad"), \
+         patch("app.core.config.config") as mock_cfg:
+
+        mock_cfg.s3_bucket = "fitted-app-bucket"
+        mock_cfg.embedding_service_url = None  # use local path
+
+        mock_model = MagicMock()
+        mock_features = MagicMock()
+        mock_features.norm.return_value = MagicMock()
+        mock_features.__truediv__ = MagicMock(return_value=mock_features)
+        mock_features.cpu.return_value.numpy.return_value.astype.return_value = fake_vec.reshape(1, 512)
+        mock_model.encode_image.return_value = mock_features
+        mock_load.return_value = (mock_model, MagicMock(), MagicMock(return_value=MagicMock(unsqueeze=MagicMock(return_value=MagicMock()))))
+
+        from app.services.embedding_service import encode_image
+        encode_image("wardrobe-images/user/item.jpg")
+
+    # Assert the correct bucket was used
+    mock_s3.get_object.assert_called_once()
+    call_kwargs = mock_s3.get_object.call_args
+    assert call_kwargs[1]["Bucket"] == "fitted-app-bucket"

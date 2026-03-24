@@ -99,8 +99,10 @@ def encode_image(url_or_s3_key: str) -> np.ndarray:
         else:
             import boto3
 
+            from app.core.config import config
+
             s3 = boto3.client("s3")
-            bucket = os.environ.get("WEATHER_BUCKET_NAME")
+            bucket = config.s3_bucket
             obj = s3.get_object(Bucket=bucket, Key=url_or_s3_key)
             image_bytes = obj["Body"].read()
         return _remote_encode_image(image_bytes)
@@ -120,9 +122,11 @@ def encode_image(url_or_s3_key: str) -> np.ndarray:
     else:
         import boto3
 
+        from app.core.config import config
+
         logger.debug("encode_image: fetching S3 key %s", url_or_s3_key)
         s3 = boto3.client("s3")
-        bucket = os.environ.get("WEATHER_BUCKET_NAME")
+        bucket = config.s3_bucket
         obj = s3.get_object(Bucket=bucket, Key=url_or_s3_key)
         image_bytes = obj["Body"].read()
 
