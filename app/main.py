@@ -2,7 +2,7 @@
 import calendar
 import secrets
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Literal, Optional
 import boto3
 import os
 import logging
@@ -62,11 +62,15 @@ def _get_client_ip(request) -> str:
     return request.client.host
 
 
+CATEGORY_FILTER_VALUES = Literal["tops", "bottoms", "shoes", "outerwear", "accessories"]
+
+
 class RecommendRequest(BaseModel):
     location: Annotated[
         str, StringConstraints(min_length=1, max_length=200, strip_whitespace=True)
     ]
     include_explanation: bool = False
+    category_filter: Optional[CATEGORY_FILTER_VALUES] = None
 
 
 @asynccontextmanager
@@ -801,6 +805,7 @@ async def recommend_products(
             style_preferences=style_preferences,
             top_k=10,
             include_explanation=request.include_explanation,
+            category_filter=request.category_filter,
         )
 
         from app.services.affiliate_service import (

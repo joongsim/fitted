@@ -322,6 +322,7 @@ class RecommendationService:
         style_preferences: dict,
         top_k: int = 10,
         include_explanation: bool = False,
+        category_filter: Optional[str] = None,
     ) -> list[ProductRecommendation]:
         """
         Full recommendation pipeline.
@@ -349,37 +350,45 @@ class RecommendationService:
         # Step 2: Embed the search query
         query_embedding = encode_text(query_text)
 
-        # Step 3: Check the vector cache
-        cache_result = await vector_cache.lookup(query_embedding)
-        if cache_result is not None:
-            candidates, _ = cache_result
-            logger.info("Using cached candidates: count=%d", len(candidates))
-        else:
-            # Step 4 (MISS): Fetch candidates from the Poshmark catalog
+        # Step 3: Fetch candidates (with or without cache, depending on category_filter)
+        if category_filter:
+            # Filtered requests bypass cache entirely — run category-aware ANN search
             candidates = await dev_catalog_service.search(
                 query_embedding=query_embedding,
                 limit=50,
+                category_filter=category_filter,
             )
             if not candidates:
                 logger.warning(
-                    "No candidates found for user_id=%s — skipping cache store",
+                    "No candidates found for user_id=%s category_filter=%s — returning empty list",
                     user_id,
+                    category_filter,
                 )
                 return []
-            # Step 5: Populate the cache for future requests
-            await vector_cache.store(
-                query_text=query_text,
-                query_embedding=query_embedding,
-                items=candidates,
-                s3_client=self._s3_client,
-                bucket=self._bucket,
-            )
-
-        if not candidates:
-            logger.warning(
-                "No candidates found for user_id=%s — returning empty list", user_id
-            )
-            return []
+        else:
+            # Unfiltered: check cache, fall back to ANN search on miss
+            cache_result = await vector_cache.lookup(query_embedding)
+            if cache_result is not None:
+                candidates, _ = cache_result
+                logger.info("Using cached candidates: count=%d", len(candidates))
+            else:
+                candidates = await dev_catalog_service.search(
+                    query_embedding=query_embedding,
+                    limit=50,
+                )
+                if not candidates:
+                    logger.warning(
+                        "No candidates found for user_id=%s — skipping cache store",
+                        user_id,
+                    )
+                    return []
+                await vector_cache.store(
+                    query_text=query_text,
+                    query_embedding=query_embedding,
+                    items=candidates,
+                    s3_client=self._s3_client,
+                    bucket=self._bucket,
+                )
 
         # Step 6: Build the user embedding
         user_embedding = await self._build_user_embedding(user_id, style_preferences)
@@ -391,7 +400,12 @@ class RecommendationService:
         from app.services import preference_reranker
 
         pref_scores = await preference_reranker.get_preference_scores(user_id)
-        ranked = preference_reranker.rerank(ranked, pref_scores)[:top_k]
+        ranked = preference_reranker.rerank(ranked, pref_scores)  # slice deferred
+
+        if category_filter:
+            ranked = ranked[:top_k]
+        else:
+            ranked = _balance_by_category(ranked, top_k)
 
         # Step 8: Optional LLM explanation
         explanation = ""

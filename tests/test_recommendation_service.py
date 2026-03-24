@@ -605,6 +605,110 @@ class TestRecommend:
         score = result[0].similarity_score
         assert score == round(score, 4)
 
+    async def test_filtered_request_skips_cache_lookup(self):
+        """When category_filter is set, cache lookup must not be called."""
+        svc = self._svc()
+        candidates = [_make_item("i1", embedding=_UNIT_VEC.copy())]
+        mock_conn, _ = _make_mock_conn(fetchall_return=[])
+        mock_cache_lookup = AsyncMock(return_value=None)
+
+        with ExitStack() as stack:
+            stack.enter_context(patch(_PATCH_LLM, new=AsyncMock(return_value="query")))
+            stack.enter_context(patch(_PATCH_ENCODE, return_value=_UNIT_VEC.copy()))
+            stack.enter_context(patch(_PATCH_CACHE_LOOKUP, new=mock_cache_lookup))
+            stack.enter_context(patch(_PATCH_CATALOG, new=AsyncMock(return_value=candidates)))
+            stack.enter_context(patch(_PATCH_CACHE_STORE, new=AsyncMock()))
+            stack.enter_context(patch(_PATCH_CONN, return_value=_mock_get_connection(mock_conn)))
+            stack.enter_context(patch(_PATCH_PREF_SCORES, new=AsyncMock(return_value={})))
+            await svc.recommend(
+                user_id="u1",
+                location="London",
+                weather_context={"temp_c": 18.0, "condition": "Sunny"},
+                style_preferences={},
+                category_filter="tops",
+            )
+
+        mock_cache_lookup.assert_not_called()
+
+    async def test_filtered_request_skips_cache_store(self):
+        """When category_filter is set, cache store must not be called."""
+        svc = self._svc()
+        candidates = [_make_item("i1", embedding=_UNIT_VEC.copy())]
+        mock_conn, _ = _make_mock_conn(fetchall_return=[])
+        mock_cache_store = AsyncMock()
+
+        with ExitStack() as stack:
+            stack.enter_context(patch(_PATCH_LLM, new=AsyncMock(return_value="query")))
+            stack.enter_context(patch(_PATCH_ENCODE, return_value=_UNIT_VEC.copy()))
+            stack.enter_context(patch(_PATCH_CACHE_LOOKUP, new=AsyncMock(return_value=None)))
+            stack.enter_context(patch(_PATCH_CATALOG, new=AsyncMock(return_value=candidates)))
+            stack.enter_context(patch(_PATCH_CACHE_STORE, new=mock_cache_store))
+            stack.enter_context(patch(_PATCH_CONN, return_value=_mock_get_connection(mock_conn)))
+            stack.enter_context(patch(_PATCH_PREF_SCORES, new=AsyncMock(return_value={})))
+            await svc.recommend(
+                user_id="u1",
+                location="London",
+                weather_context={"temp_c": 18.0, "condition": "Sunny"},
+                style_preferences={},
+                category_filter="tops",
+            )
+
+        mock_cache_store.assert_not_called()
+
+    async def test_filtered_request_passes_category_to_catalog(self):
+        """category_filter must be forwarded to dev_catalog_service.search()."""
+        svc = self._svc()
+        mock_conn, _ = _make_mock_conn(fetchall_return=[])
+        mock_catalog = AsyncMock(return_value=[_make_item("i1", embedding=_UNIT_VEC.copy())])
+
+        with ExitStack() as stack:
+            stack.enter_context(patch(_PATCH_LLM, new=AsyncMock(return_value="query")))
+            stack.enter_context(patch(_PATCH_ENCODE, return_value=_UNIT_VEC.copy()))
+            stack.enter_context(patch(_PATCH_CACHE_LOOKUP, new=AsyncMock(return_value=None)))
+            stack.enter_context(patch(_PATCH_CATALOG, new=mock_catalog))
+            stack.enter_context(patch(_PATCH_CACHE_STORE, new=AsyncMock()))
+            stack.enter_context(patch(_PATCH_CONN, return_value=_mock_get_connection(mock_conn)))
+            stack.enter_context(patch(_PATCH_PREF_SCORES, new=AsyncMock(return_value={})))
+            await svc.recommend(
+                user_id="u1",
+                location="London",
+                weather_context={"temp_c": 18.0, "condition": "Sunny"},
+                style_preferences={},
+                category_filter="shoes",
+            )
+
+        call_kwargs = mock_catalog.call_args.kwargs
+        assert call_kwargs.get("category_filter") == "shoes"
+
+    async def test_unfiltered_request_applies_balance(self):
+        """Without category_filter, result must contain items from multiple categories."""
+        svc = self._svc()
+        # 10 tops then 10 bottoms — balancer should interleave them
+        candidates = (
+            [_make_item_with_category(f"t{i}", "tops") for i in range(10)]
+            + [_make_item_with_category(f"b{i}", "bottoms") for i in range(10)]
+        )
+        mock_conn, _ = _make_mock_conn(fetchall_return=[])
+
+        with ExitStack() as stack:
+            stack.enter_context(patch(_PATCH_LLM, new=AsyncMock(return_value="query")))
+            stack.enter_context(patch(_PATCH_ENCODE, return_value=_UNIT_VEC.copy()))
+            stack.enter_context(patch(_PATCH_CACHE_LOOKUP, new=AsyncMock(return_value=None)))
+            stack.enter_context(patch(_PATCH_CATALOG, new=AsyncMock(return_value=candidates)))
+            stack.enter_context(patch(_PATCH_CACHE_STORE, new=AsyncMock(return_value="id")))
+            stack.enter_context(patch(_PATCH_CONN, return_value=_mock_get_connection(mock_conn)))
+            stack.enter_context(patch(_PATCH_PREF_SCORES, new=AsyncMock(return_value={})))
+            result = await svc.recommend(
+                user_id="u1",
+                location="London",
+                weather_context={"temp_c": 18.0, "condition": "Sunny"},
+                style_preferences={},
+                top_k=4,
+            )
+
+        cats = {r.attributes.get("category") for r in result}
+        assert len(cats) > 1  # both tops and bottoms should appear
+
 
 # ---------------------------------------------------------------------------
 # Module-level singleton
