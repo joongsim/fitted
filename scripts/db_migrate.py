@@ -229,6 +229,17 @@ ALTER TABLE users DROP COLUMN IF EXISTS reset_token_expires_at;
 ALTER TABLE users DROP COLUMN IF EXISTS reset_token;
 """
 
+# Migration: embedding_status column on wardrobe_items
+EMBEDDING_STATUS_MIGRATION_SQL = """
+ALTER TABLE wardrobe_items
+  ADD COLUMN IF NOT EXISTS embedding_status VARCHAR(10) NOT NULL DEFAULT 'pending'
+  CHECK (embedding_status IN ('pending', 'embedding', 'done', 'failed'));
+"""
+
+EMBEDDING_STATUS_ROLLBACK_SQL = """
+ALTER TABLE wardrobe_items DROP COLUMN IF EXISTS embedding_status;
+"""
+
 
 def _split_statements(sql: str) -> list[str]:
     """Split a SQL script into individual statements, respecting dollar-quoted blocks.
@@ -275,6 +286,9 @@ def migrate() -> None:
                 conn.autocommit = True
                 print("Applying schema...")
                 for statement in _split_statements(SCHEMA_SQL):
+                    cur.execute(statement)
+                print("Applying embedding_status migration...")
+                for statement in _split_statements(EMBEDDING_STATUS_MIGRATION_SQL):
                     cur.execute(statement)
                 print("Migration successful.")
     except Exception as e:
