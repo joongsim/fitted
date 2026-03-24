@@ -1,5 +1,6 @@
 # app/main.py
 import calendar
+import html
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Literal, Optional
@@ -1001,6 +1002,46 @@ async def delete_wardrobe_item(
             status_code=status.HTTP_404_NOT_FOUND, detail="Wardrobe item not found"
         )
     logger.info("DELETE /wardrobe/%s: deleted by user_id=%s", item_id, user_id)
+
+
+@app.get("/wardrobe/{item_id}/status")
+async def get_wardrobe_item_status(
+    item_id: str,
+    request: Request,
+    user_id: str = Depends(auth.get_current_user_id),
+):
+    """
+    Return the embedding status for a wardrobe item.
+
+    When called from HTMX (HX-Request header present), returns an HTML badge
+    partial instead of JSON. Polling stops automatically when the badge for
+    terminal states (done/failed) omits hx-trigger.
+    """
+    from app.services import wardrobe_service
+    from app.models.wardrobe import WardrobeItemStatusResponse
+    from fastapi.responses import HTMLResponse
+
+    embedding_status = await wardrobe_service.get_wardrobe_item_status(user_id, item_id)
+    if embedding_status is None:
+        raise HTTPException(status_code=404, detail="Wardrobe item not found")
+
+    if request.headers.get("HX-Request"):
+        safe_id = html.escape(item_id)
+        if embedding_status in ("pending", "embedding"):
+            safe_status = html.escape(embedding_status)
+            badge_html = (
+                f'<span id="embed-status-{safe_id}" '
+                f'hx-get="/wardrobe/{safe_id}/status" '
+                f'hx-trigger="every 2s" hx-target="this" hx-swap="outerHTML" '
+                f'class="badge badge-pending">⏳ {safe_status}</span>'
+            )
+        elif embedding_status == "done":
+            badge_html = f'<span id="embed-status-{safe_id}" class="badge badge-done">✓ ready</span>'
+        else:
+            badge_html = f'<span id="embed-status-{safe_id}" class="badge badge-failed">✗ failed</span>'
+        return HTMLResponse(content=badge_html)
+
+    return WardrobeItemStatusResponse(item_id=item_id, embedding_status=embedding_status)
 
 
 @app.put("/wardrobe/{item_id}")
