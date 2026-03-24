@@ -40,7 +40,7 @@ custom_css = Style(
     :root {
         --pico-background-color: #fffbeb; 
         --pico-card-background-color: #ffffff;
-        --pico-color: #1e293b; /* Dark text for light background */
+        --pico-color: #000000; /* Dark text for light background */
         --pico-muted-color: #64748b;
         --pico-primary-hover: #000000;
         --pico-border-radius: 0;
