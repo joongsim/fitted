@@ -23,7 +23,7 @@ tunnel:
 	ssh $(EC2_HOST) -N -L 5432:localhost:5432
 
 tunnel-embed:
-	ssh -R 8001:localhost:8001 $(EC2_HOST)
+	ssh -o ExitOnForwardFailure=yes -R 8001:localhost:8001 $(EC2_HOST)
 
 embed-server:
 	$(PYTHON) scripts/embedding_server.py $(ARGS)

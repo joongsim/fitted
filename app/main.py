@@ -809,11 +809,17 @@ async def recommend_products(
             record_affiliate_click,
             rewrite_to_affiliate_url,
         )
+        from app.services.storage_service import get_image_presigned_url
 
         affiliate_cfg = get_affiliate_config()
         recs_out = []
         for rec in recommendations:
             rec_dict = rec.model_dump()
+            # Catalog images are stored as s3://bucket/key — convert to presigned HTTPS URL
+            raw_image_url = rec_dict.get("image_url") or ""
+            if raw_image_url.startswith("s3://"):
+                _, _, path = raw_image_url[5:].partition("/")
+                rec_dict["image_url"] = get_image_presigned_url(path)
             original_url = rec_dict.get("product_url") or ""
             affiliate_url = rewrite_to_affiliate_url(original_url, **affiliate_cfg)
             network = (
