@@ -276,6 +276,26 @@ async def update_wardrobe_item(
     }
 
 
+async def get_wardrobe_item_status(user_id: str, item_id: str) -> Optional[str]:
+    """
+    Return the embedding_status for a wardrobe item, enforcing ownership.
+
+    Returns the status string ('pending', 'embedding', 'done', 'failed'),
+    or None if the item doesn't exist or is not owned by user_id.
+    """
+    async with get_connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT embedding_status FROM wardrobe_items WHERE item_id = %s AND user_id = %s",
+                (item_id, user_id),
+            )
+            row = await cur.fetchone()
+
+    if row is None:
+        return None
+    return row[0]
+
+
 async def embed_wardrobe_item(item_id: str, s3_key: str) -> None:
     """
     Encode the wardrobe item image at s3_key with CLIP and persist the embedding.

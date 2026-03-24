@@ -450,3 +450,42 @@ class TestEmbedWardrobeItem:
              self._make_executor_patch(None, raise_exc=original_exc):
             with pytest.raises(RuntimeError, match="encode failed"):
                 await wardrobe_service.embed_wardrobe_item(self._ITEM_ID_STR, self._S3_KEY)
+
+
+# ---------------------------------------------------------------------------
+# get_wardrobe_item_status
+# ---------------------------------------------------------------------------
+
+class TestGetWardrobeItemStatus:
+    @pytest.mark.asyncio
+    async def test_found_returns_status_string(self):
+        mock_conn, _ = _make_mock_conn(fetchone_return=("done",))
+
+        with patch(_PATCH_CONN, return_value=_mock_get_connection(mock_conn)):
+            result = await wardrobe_service.get_wardrobe_item_status(
+                _USER_ID, str(_ITEM_ID)
+            )
+
+        assert result == "done"
+
+    @pytest.mark.asyncio
+    async def test_not_found_returns_none(self):
+        mock_conn, _ = _make_mock_conn(fetchone_return=None)
+
+        with patch(_PATCH_CONN, return_value=_mock_get_connection(mock_conn)):
+            result = await wardrobe_service.get_wardrobe_item_status(
+                _USER_ID, "nonexistent-id"
+            )
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_query_filters_by_both_item_id_and_user_id(self):
+        mock_conn, mock_cur = _make_mock_conn(fetchone_return=None)
+
+        with patch(_PATCH_CONN, return_value=_mock_get_connection(mock_conn)):
+            await wardrobe_service.get_wardrobe_item_status(_USER_ID, str(_ITEM_ID))
+
+        params = mock_cur.execute.call_args[0][1]
+        assert str(_ITEM_ID) in params
+        assert _USER_ID in params
