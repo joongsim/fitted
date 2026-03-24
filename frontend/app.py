@@ -554,6 +554,11 @@ custom_css = Style(
         font-size: 0.875rem;
     }
     .auth-link a { color: #16a34a; font-weight: bold; }
+
+    .filter-bar { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1rem; }
+    .filter-btn { padding: 0.35rem 0.85rem; border-radius: 9999px; border: 1px solid #cbd5e1; background: #f8fafc; color: #334155; cursor: pointer; font-size: 0.85rem; }
+    .filter-btn.active { background: #1e293b; color: #f8fafc; border-color: #1e293b; }
+    .filter-btn:hover:not(.active) { background: #e2e8f0; }
 """
 )
 
@@ -666,6 +671,39 @@ def nav_bar(session):
     else:
         links.extend([A("Login", href="/login"), A("Register", href="/register")])
     return Div(*links, cls="nav-bar")
+
+
+_CATEGORIES = [
+    ("all", "All"),
+    ("tops", "Tops"),
+    ("bottoms", "Bottoms"),
+    ("shoes", "Shoes"),
+    ("outerwear", "Outerwear"),
+    ("accessories", "Accessories"),
+]
+
+
+def filter_bar(location: str, active: str):
+    """Filter pill row — included in every #rec-results swap."""
+    buttons = []
+    for value, label in _CATEGORIES:
+        is_active = value == active
+        buttons.append(
+            Form(
+                Input(type="hidden", name="location", value=location),
+                Input(type="hidden", name="category", value=value),
+                Button(
+                    label,
+                    type="submit",
+                    cls="filter-btn active" if is_active else "filter-btn",
+                ),
+                hx_post="/get-recommendations",
+                hx_target="#rec-results",
+                hx_swap="outerHTML",
+                style="display:inline",
+            )
+        )
+    return Div(*buttons, cls="filter-bar")
 
 
 def metric_card(label: str, value: str, icon: str) -> Div:
@@ -1389,7 +1427,7 @@ async def recommendations_page(session):
 
 
 @app.post("/get-recommendations")
-async def get_recommendations(location: str, session):
+async def get_recommendations(location: str, session, category: str = "all"):
     """HTMX fragment: call POST /recommend-products, return a product card grid."""
     if "access_token" not in session:
         return P("Please log in to get recommendations.", cls="error-message")
@@ -1406,7 +1444,11 @@ async def get_recommendations(location: str, session):
         async with httpx.AsyncClient() as client:
             resp = await client.post(
                 f"{API_BASE_URL}/recommend-products",
-                json={"location": location, "include_explanation": False},
+                json={
+                    "location": location,
+                    "include_explanation": False,
+                    "category_filter": None if category == "all" else category,
+                },
                 headers=headers,
                 timeout=45.0,
             )
@@ -1418,7 +1460,11 @@ async def get_recommendations(location: str, session):
                     resp.status_code,
                     err,
                 )
-                return P(f"Error: {err}", cls="error-message", id="rec-results")
+                return Div(
+                    filter_bar(location, category),
+                    P(f"Error: {err}", cls="error-message"),
+                    id="rec-results",
+                )
 
             data = resp.json()
             recommendations = data.get("recommendations", [])
@@ -1432,20 +1478,21 @@ async def get_recommendations(location: str, session):
             location,
             exc_info=True,
         )
-        return P(
-            "Connection error: could not reach the server.",
-            cls="error-message",
+        return Div(
+            filter_bar(location, category),
+            P("Connection error: could not reach the server.", cls="error-message"),
             id="rec-results",
         )
 
     if not recommendations:
-        return P(
-            "No recommendations found for this location.",
-            cls="rec-meta",
+        return Div(
+            filter_bar(location, category),
+            P("No recommendations found for this location.", cls="rec-meta"),
             id="rec-results",
         )
 
     return Div(
+        filter_bar(location, category),
         P(
             f"Top picks for {location} ({condition}, {temp_c:.0f}\u00b0C)",
             cls="rec-meta",
