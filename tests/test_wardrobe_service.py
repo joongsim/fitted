@@ -390,7 +390,7 @@ class TestEmbedWardrobeItem:
         # First DB call: SET embedding_status = 'embedding'
         sql1, params1 = cur1.execute.call_args[0]
         assert "embedding_status" in sql1
-        assert "embedding" in sql1
+        assert "'embedding'" in sql1
         conn1.commit.assert_awaited_once()
 
         # Second DB call: SET embedding + done

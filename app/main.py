@@ -945,7 +945,6 @@ async def add_wardrobe_item(
     )
 
     if image_s3_key:
-        import asyncio
         asyncio.create_task(
             wardrobe_service.embed_wardrobe_item(item["item_id"], image_s3_key)
         )
