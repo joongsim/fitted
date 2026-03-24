@@ -125,8 +125,8 @@ custom_css = Style(
     }
     
     .error-message {
-        background-color: #fef2f2;
-        border: 1px solid #fecaca;
+        background-color: #ffffff;
+        border: 2px solid #dc2626;
         color: #dc2626;
         padding: 1rem;
         border-radius: 0;
@@ -526,9 +526,9 @@ custom_css = Style(
         margin-top: 0.25rem;
     }
     .prefs-success {
-        background-color: #f0fdf4;
-        border: 1px solid #86efac;
-        color: #15803d;
+        background-color: #95FB62;
+        border: 2px solid #000;
+        color: #000000;
         padding: 0.75rem 1rem;
         margin-top: 1rem;
     }
