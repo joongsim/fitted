@@ -334,6 +334,8 @@ class RecommendationService:
             style_preferences: User's style_preferences JSONB dict.
             top_k: Number of recommendations to return.
             include_explanation: Call LLM for natural-language explanation.
+            category_filter: Optional category to restrict candidates (e.g. "tops").
+                When set, bypasses the vector cache and runs a category-aware ANN search.
 
         Returns:
             Ranked list of ProductRecommendation objects.
