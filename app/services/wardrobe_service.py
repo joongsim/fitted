@@ -274,3 +274,51 @@ async def update_wardrobe_item(
         "created_at": created_at,
         "embedding_status": emb_status,
     }
+
+
+async def embed_wardrobe_item(item_id: str, s3_key: str) -> None:
+    """
+    Encode the wardrobe item image at s3_key with CLIP and persist the embedding.
+
+    Sets embedding_status to 'embedding' before starting, then 'done' on
+    success or 'failed' on any exception. Offloads the synchronous encode_image
+    call to a thread pool executor to avoid blocking the event loop.
+    """
+    from app.services.embedding_service import encode_image
+
+    async with get_connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "UPDATE wardrobe_items SET embedding_status = 'embedding' WHERE item_id = %s",
+                (item_id,),
+            )
+        await conn.commit()
+
+    try:
+        loop = asyncio.get_running_loop()
+        vec = await loop.run_in_executor(None, encode_image, s3_key)
+
+        async with get_connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "UPDATE wardrobe_items SET embedding = %s::vector, embedding_status = 'done' WHERE item_id = %s",
+                    (vec.tolist(), item_id),
+                )
+            await conn.commit()
+
+    except Exception:
+        try:
+            async with get_connection() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute(
+                        "UPDATE wardrobe_items SET embedding_status = 'failed' WHERE item_id = %s",
+                        (item_id,),
+                    )
+                await conn.commit()
+        except Exception:
+            logger.error(
+                "embed_wardrobe_item: failed to set failed status: item_id=%s",
+                item_id,
+                exc_info=True,
+            )
+        raise

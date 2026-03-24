@@ -344,3 +344,109 @@ class TestUpdateWardrobeItem:
 
         # No DB query should have been executed
         mock_cur.execute.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# embed_wardrobe_item
+# ---------------------------------------------------------------------------
+
+class TestEmbedWardrobeItem:
+    _ITEM_ID_STR = str(_ITEM_ID)
+    _S3_KEY = "wardrobe-images/user/item.jpg"
+
+    def _make_executor_patch(self, vec, raise_exc=None):
+        """
+        Patch asyncio.get_running_loop so run_in_executor calls encode_image
+        synchronously and returns vec (or raises raise_exc).
+        """
+        mock_loop = MagicMock()
+        if raise_exc:
+            async def fake_executor(executor, fn, *args):
+                raise raise_exc
+        else:
+            async def fake_executor(executor, fn, *args):
+                return vec
+        mock_loop.run_in_executor = fake_executor
+        return patch("asyncio.get_running_loop", return_value=mock_loop)
+
+    @pytest.mark.asyncio
+    async def test_success_sets_embedding_and_done_status(self):
+        import numpy as np
+        vec = np.ones(512, dtype=np.float32)
+        vec /= np.linalg.norm(vec)
+
+        conn1, cur1 = _make_mock_conn()  # SET embedding
+        conn2, cur2 = _make_mock_conn()  # SET done
+        call_iter = [_mock_get_connection(conn1), _mock_get_connection(conn2)]
+        idx = [-1]
+        def next_conn():
+            idx[0] += 1
+            return call_iter[idx[0]]
+
+        with patch(_PATCH_CONN, side_effect=next_conn), \
+             self._make_executor_patch(vec):
+            await wardrobe_service.embed_wardrobe_item(self._ITEM_ID_STR, self._S3_KEY)
+
+        # First DB call: SET embedding_status = 'embedding'
+        sql1, params1 = cur1.execute.call_args[0]
+        assert "embedding_status" in sql1
+        assert "embedding" in sql1
+        conn1.commit.assert_awaited_once()
+
+        # Second DB call: SET embedding + done
+        sql2, params2 = cur2.execute.call_args[0]
+        assert "embedding_status" in sql2
+        assert "done" in sql2
+        assert "::vector" in sql2
+        conn2.commit.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_failure_sets_failed_status_and_reraises(self):
+        conn1, cur1 = _make_mock_conn()  # SET embedding
+        conn2, cur2 = _make_mock_conn()  # SET failed
+        call_iter = [_mock_get_connection(conn1), _mock_get_connection(conn2)]
+        idx = [-1]
+        def next_conn():
+            idx[0] += 1
+            return call_iter[idx[0]]
+
+        exc = RuntimeError("CLIP exploded")
+        with patch(_PATCH_CONN, side_effect=next_conn), \
+             self._make_executor_patch(None, raise_exc=exc):
+            with pytest.raises(RuntimeError, match="CLIP exploded"):
+                await wardrobe_service.embed_wardrobe_item(self._ITEM_ID_STR, self._S3_KEY)
+
+        # Cleanup DB call: SET embedding_status = 'failed'
+        sql2, _ = cur2.execute.call_args[0]
+        assert "failed" in sql2
+        conn2.commit.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_cleanup_error_is_swallowed_original_reraises(self):
+        """If the failed-status UPDATE itself throws, original exception still propagates."""
+        conn1, _ = _make_mock_conn()
+
+        bad_conn = MagicMock()
+        bad_conn.commit = AsyncMock(side_effect=Exception("DB gone"))
+        bad_cur = AsyncMock()
+        bad_cur.execute = AsyncMock()
+        bad_cur_ctx = MagicMock()
+        bad_cur_ctx.__aenter__ = AsyncMock(return_value=bad_cur)
+        bad_cur_ctx.__aexit__ = AsyncMock(return_value=False)
+        bad_conn.cursor = MagicMock(return_value=bad_cur_ctx)
+
+        @asynccontextmanager
+        async def _bad_conn_ctx():
+            yield bad_conn
+
+        call_iter = [_mock_get_connection(conn1), _bad_conn_ctx()]
+        idx = [-1]
+        def next_conn():
+            idx[0] += 1
+            return call_iter[idx[0]]
+
+        original_exc = RuntimeError("encode failed")
+        with patch(_PATCH_CONN, side_effect=next_conn), \
+             self._make_executor_patch(None, raise_exc=original_exc):
+            with pytest.raises(RuntimeError, match="encode failed"):
+                await wardrobe_service.embed_wardrobe_item(self._ITEM_ID_STR, self._S3_KEY)
