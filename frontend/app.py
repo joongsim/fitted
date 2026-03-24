@@ -489,7 +489,7 @@ custom_css = Style(
         font-size: 0.875rem;
         font-weight: bold;
     }
-    .shop-btn:hover { background-color: #7de84a; }
+    .shop-btn:hover { background-color: #000000; color: #95FB62; }
     .rec-meta {
         font-size: 0.8rem;
         color: #64748b;
@@ -557,9 +557,9 @@ custom_css = Style(
     .auth-link a { color: #16a34a; font-weight: bold; }
 
     .filter-bar { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1rem; }
-    .filter-btn { padding: 0.35rem 0.85rem; border-radius: 9999px; border: 1px solid #cbd5e1; background: #f8fafc; color: #334155; cursor: pointer; font-size: 0.85rem; }
-    .filter-btn.active { background: #1e293b; color: #f8fafc; border-color: #1e293b; }
-    .filter-btn:hover:not(.active) { background: #e2e8f0; }
+    .filter-btn { padding: 0.35rem 0.85rem; border-radius: 0; border: 2px solid #000; background: #fff; color: #000; cursor: pointer; font-size: 0.85rem; font-weight: bold; }
+    .filter-btn.active { background: #95FB62; color: #000; border-color: #000; }
+    .filter-btn:hover:not(.active) { background: #000; color: #95FB62; }
 """
 )
 
