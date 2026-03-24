@@ -42,7 +42,7 @@ custom_css = Style(
         --pico-card-background-color: #ffffff;
         --pico-color: #1e293b; /* Dark text for light background */
         --pico-muted-color: #64748b;
-        --pico-primary-hover: #15803d;
+        --pico-primary-hover: #000000;
         --pico-border-radius: 0;
     }
     
@@ -114,13 +114,14 @@ custom_css = Style(
         width: 100%;
         background-color: #95FB62 !important;
         border: 2px solid #000000 !important;
-        --pico-background-color: #16a34a;
+        --pico-background-color: #95FB62;
     }
     
     .search-form button:hover {
-        background-color:rgb(0, 145, 255) !important;
+        background-color: #000000 !important;
         border: 2px solid #000000 !important;
-        --pico-background-color: rgb(0, 145, 255);
+        --pico-background-color: #000000;
+        color: #95FB62;
     }
     
     .error-message {
