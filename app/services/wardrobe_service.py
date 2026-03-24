@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from typing import Optional
 
@@ -33,14 +34,14 @@ async def create_wardrobe_item(
                 """
                 INSERT INTO wardrobe_items (user_id, name, category, image_s3_key)
                 VALUES (%s, %s, %s, %s)
-                RETURNING item_id, name, category, image_s3_key, tags, created_at
+                RETURNING item_id, name, category, image_s3_key, tags, created_at, embedding_status
                 """,
                 (user_id, name, category, image_s3_key),
             )
             row = await cur.fetchone()
             await conn.commit()
 
-    item_id, name_, cat, s3_key, tags, created_at = row
+    item_id, name_, cat, s3_key, tags, created_at, emb_status = row
     logger.info(
         "wardrobe_service.create: user_id=%s item_id=%s name=%r category=%s",
         user_id,
@@ -55,6 +56,7 @@ async def create_wardrobe_item(
         "image_s3_key": s3_key,
         "tags": list(tags) if tags else [],
         "created_at": created_at,
+        "embedding_status": emb_status,
     }
 
 
@@ -73,7 +75,7 @@ async def get_wardrobe_items(user_id: str) -> list[dict]:
         async with conn.cursor() as cur:
             await cur.execute(
                 """
-                SELECT item_id, name, category, image_s3_key, tags, created_at
+                SELECT item_id, name, category, image_s3_key, tags, created_at, embedding_status
                 FROM wardrobe_items
                 WHERE user_id = %s
                 ORDER BY created_at DESC
@@ -83,7 +85,7 @@ async def get_wardrobe_items(user_id: str) -> list[dict]:
             rows = await cur.fetchall()
 
     items = []
-    for item_id, name, cat, s3_key, tags, created_at in rows:
+    for item_id, name, cat, s3_key, tags, created_at, emb_status in rows:
         items.append(
             {
                 "item_id": str(item_id),
@@ -92,6 +94,7 @@ async def get_wardrobe_items(user_id: str) -> list[dict]:
                 "image_s3_key": s3_key,
                 "tags": list(tags) if tags else [],
                 "created_at": created_at,
+                "embedding_status": emb_status,
             }
         )
 
@@ -118,7 +121,7 @@ async def get_wardrobe_item(user_id: str, item_id: str) -> Optional[dict]:
         async with conn.cursor() as cur:
             await cur.execute(
                 """
-                SELECT item_id, name, category, image_s3_key, tags, created_at
+                SELECT item_id, name, category, image_s3_key, tags, created_at, embedding_status
                 FROM wardrobe_items
                 WHERE item_id = %s AND user_id = %s
                 """,
@@ -134,7 +137,7 @@ async def get_wardrobe_item(user_id: str, item_id: str) -> Optional[dict]:
         )
         return None
 
-    rid, name, cat, s3_key, tags, created_at = row
+    rid, name, cat, s3_key, tags, created_at, emb_status = row
     return {
         "item_id": str(rid),
         "name": name,
@@ -142,6 +145,7 @@ async def get_wardrobe_item(user_id: str, item_id: str) -> Optional[dict]:
         "image_s3_key": s3_key,
         "tags": list(tags) if tags else [],
         "created_at": created_at,
+        "embedding_status": emb_status,
     }
 
 
@@ -235,7 +239,7 @@ async def update_wardrobe_item(
         UPDATE wardrobe_items
         SET {', '.join(set_clauses)}
         WHERE item_id = %s AND user_id = %s
-        RETURNING item_id, name, category, image_s3_key, tags, created_at
+        RETURNING item_id, name, category, image_s3_key, tags, created_at, embedding_status
     """
     params.extend([item_id, user_id])
 
@@ -253,7 +257,7 @@ async def update_wardrobe_item(
         )
         return None
 
-    rid, name_, cat, s3_key, tags_, created_at = row
+    rid, name_, cat, s3_key, tags_, created_at, emb_status = row
     logger.info(
         "wardrobe_service.update: user_id=%s item_id=%s name=%r category=%s",
         user_id,
@@ -268,4 +272,5 @@ async def update_wardrobe_item(
         "image_s3_key": s3_key,
         "tags": list(tags_) if tags_ else [],
         "created_at": created_at,
+        "embedding_status": emb_status,
     }

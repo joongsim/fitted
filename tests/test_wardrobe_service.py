@@ -65,6 +65,7 @@ class TestCreateWardrobeItem:
             "wardrobe-images/u/i.jpg",
             ["navy"],
             _NOW,
+            "pending",
         )
         mock_conn, _ = _make_mock_conn(fetchone_return=row)
 
@@ -82,10 +83,11 @@ class TestCreateWardrobeItem:
         assert result["image_s3_key"] == "wardrobe-images/u/i.jpg"
         assert result["tags"] == ["navy"]
         assert result["created_at"] == _NOW
+        assert result["embedding_status"] == "pending"
 
     @pytest.mark.asyncio
     async def test_commits_transaction(self):
-        row = (_ITEM_ID, "T-Shirt", None, None, [], _NOW)
+        row = (_ITEM_ID, "T-Shirt", None, None, [], _NOW, "pending")
         mock_conn, _ = _make_mock_conn(fetchone_return=row)
 
         with patch(_PATCH_CONN, return_value=_mock_get_connection(mock_conn)):
@@ -97,7 +99,7 @@ class TestCreateWardrobeItem:
 
     @pytest.mark.asyncio
     async def test_null_tags_returns_empty_list(self):
-        row = (_ITEM_ID, "Item", None, None, None, _NOW)
+        row = (_ITEM_ID, "Item", None, None, None, _NOW, "pending")
         mock_conn, _ = _make_mock_conn(fetchone_return=row)
 
         with patch(_PATCH_CONN, return_value=_mock_get_connection(mock_conn)):
@@ -109,7 +111,7 @@ class TestCreateWardrobeItem:
 
     @pytest.mark.asyncio
     async def test_executes_insert_with_correct_params(self):
-        row = (_ITEM_ID, "Jeans", "bottoms", None, [], _NOW)
+        row = (_ITEM_ID, "Jeans", "bottoms", None, [], _NOW, "pending")
         mock_conn, mock_cur = _make_mock_conn(fetchone_return=row)
 
         with patch(_PATCH_CONN, return_value=_mock_get_connection(mock_conn)):
@@ -135,8 +137,8 @@ class TestGetWardrobeItems:
     @pytest.mark.asyncio
     async def test_returns_list_of_dicts(self):
         rows = [
-            (_ITEM_ID, "Blazer", "outerwear", "s3/key.jpg", ["navy"], _NOW),
-            (uuid.uuid4(), "Jeans", "bottoms", None, [], _NOW),
+            (_ITEM_ID, "Blazer", "outerwear", "s3/key.jpg", ["navy"], _NOW, "pending"),
+            (uuid.uuid4(), "Jeans", "bottoms", None, [], _NOW, "pending"),
         ]
         mock_conn, _ = _make_mock_conn(fetchall_return=rows)
 
@@ -159,7 +161,7 @@ class TestGetWardrobeItems:
 
     @pytest.mark.asyncio
     async def test_null_tags_normalised_to_empty_list(self):
-        rows = [(_ITEM_ID, "Shirt", None, None, None, _NOW)]
+        rows = [(_ITEM_ID, "Shirt", None, None, None, _NOW, "pending")]
         mock_conn, _ = _make_mock_conn(fetchall_return=rows)
 
         with patch(_PATCH_CONN, return_value=_mock_get_connection(mock_conn)):
@@ -176,7 +178,7 @@ class TestGetWardrobeItems:
 class TestGetWardrobeItem:
     @pytest.mark.asyncio
     async def test_found_returns_dict(self):
-        row = (_ITEM_ID, "Blazer", "outerwear", "s3/key.jpg", ["navy"], _NOW)
+        row = (_ITEM_ID, "Blazer", "outerwear", "s3/key.jpg", ["navy"], _NOW, "pending")
         mock_conn, _ = _make_mock_conn(fetchone_return=row)
 
         with patch(_PATCH_CONN, return_value=_mock_get_connection(mock_conn)):
@@ -266,7 +268,7 @@ class TestDeleteWardrobeItem:
 class TestUpdateWardrobeItem:
     @pytest.mark.asyncio
     async def test_returns_updated_dict(self):
-        row = (_ITEM_ID, "Updated Blazer", "tops", "s3/key.jpg", ["blue"], _NOW)
+        row = (_ITEM_ID, "Updated Blazer", "tops", "s3/key.jpg", ["blue"], _NOW, "pending")
         mock_conn, _ = _make_mock_conn(fetchone_return=row)
 
         with patch(_PATCH_CONN, return_value=_mock_get_connection(mock_conn)):
@@ -283,6 +285,7 @@ class TestUpdateWardrobeItem:
         assert result["name"] == "Updated Blazer"
         assert result["category"] == "tops"
         assert result["tags"] == ["blue"]
+        assert result["embedding_status"] == "pending"
 
     @pytest.mark.asyncio
     async def test_returns_none_when_not_found(self):
@@ -299,7 +302,7 @@ class TestUpdateWardrobeItem:
 
     @pytest.mark.asyncio
     async def test_commits_transaction(self):
-        row = (_ITEM_ID, "Blazer", "outerwear", None, [], _NOW)
+        row = (_ITEM_ID, "Blazer", "outerwear", None, [], _NOW, "pending")
         mock_conn, _ = _make_mock_conn(fetchone_return=row)
 
         with patch(_PATCH_CONN, return_value=_mock_get_connection(mock_conn)):
