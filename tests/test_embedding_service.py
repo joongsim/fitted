@@ -383,6 +383,7 @@ def test_encode_image_uses_app_bucket_not_weather_bucket():
     fake_vec /= np.linalg.norm(fake_vec)
 
     with patch("boto3.client", return_value=mock_s3), \
+         patch("app.services.embedding_service._remote_url", return_value=None), \
          patch("app.services.embedding_service._load_model_and_transform") as mock_load, \
          patch("torch.no_grad"), \
          patch("app.core.config.config") as mock_cfg:
@@ -404,4 +405,4 @@ def test_encode_image_uses_app_bucket_not_weather_bucket():
     # Assert the correct bucket was used
     mock_s3.get_object.assert_called_once()
     call_kwargs = mock_s3.get_object.call_args
-    assert call_kwargs[1]["Bucket"] == "fitted-app-bucket"
+    assert call_kwargs.kwargs["Bucket"] == "fitted-app-bucket"
