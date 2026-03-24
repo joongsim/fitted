@@ -1436,6 +1436,8 @@ async def get_recommendations(location: str, session, category: str = "all"):
         return P("Please enter a location.", cls="error-message")
 
     location = location.strip()
+    if category not in {v for v, _ in _CATEGORIES}:
+        category = "all"
     token = session["access_token"]
     headers = {"Authorization": f"Bearer {token}"}
     logger.info("Recommendations request from frontend for location=%s", location)
