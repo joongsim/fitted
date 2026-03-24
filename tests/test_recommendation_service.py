@@ -20,6 +20,7 @@ from app.services.recommendation_service import (
     RecommendationService,
     UserTower,
     _EMBED_DIM,
+    _balance_by_category,
     get_recommendation_service,
     init_recommendation_service,
 )
@@ -43,6 +44,20 @@ def _make_item(item_id: str = "item-1", embedding: np.ndarray | None = None) -> 
         source="poshmark_seed",
         embedding=embedding,
         attributes={"brand": "Zara"},
+    )
+
+
+def _make_item_with_category(item_id: str, category: str) -> Item:
+    return Item(
+        item_id=item_id,
+        domain="fashion",
+        title=f"Item {item_id}",
+        price=10.0,
+        image_url="",
+        product_url="",
+        source="poshmark_seed",
+        embedding=_UNIT_VEC.copy(),
+        attributes={"category": category},
     )
 
 
@@ -644,3 +659,101 @@ class TestSingleton:
                     second = get_recommendation_service()
 
         assert first is second
+
+
+# ---------------------------------------------------------------------------
+# _balance_by_category
+# ---------------------------------------------------------------------------
+
+
+def _make_categorized_item(item_id: str, category: str, score: float):
+    item = Item(
+        item_id=item_id,
+        domain="fashion",
+        title=f"Item {item_id}",
+        price=10.0,
+        image_url="",
+        product_url="",
+        source="poshmark_seed",
+        embedding=None,
+        attributes={"category": category},
+    )
+    return (item, score)
+
+
+class TestBalanceByCategory:
+    def test_returns_top_k_items(self):
+        ranked = [
+            _make_categorized_item(f"t{i}", "tops", 1.0 - i * 0.01) for i in range(5)
+        ] + [
+            _make_categorized_item(f"b{i}", "bottoms", 0.9 - i * 0.01) for i in range(5)
+        ]
+        result = _balance_by_category(ranked, top_k=4)
+        assert len(result) == 4
+
+    def test_alternates_categories_round_robin(self):
+        ranked = [
+            _make_categorized_item("t1", "tops", 1.0),
+            _make_categorized_item("t2", "tops", 0.9),
+            _make_categorized_item("b1", "bottoms", 0.8),
+            _make_categorized_item("b2", "bottoms", 0.7),
+        ]
+        result = _balance_by_category(ranked, top_k=4)
+        categories = [item.attributes["category"] for item, _ in result]
+        # Should alternate: tops, bottoms, tops, bottoms
+        assert categories[0] != categories[1]
+        assert categories[0] == categories[2]
+        assert categories[1] == categories[3]
+
+    def test_handles_fewer_candidates_than_top_k(self):
+        ranked = [_make_categorized_item("t1", "tops", 1.0)]
+        result = _balance_by_category(ranked, top_k=10)
+        assert len(result) == 1
+
+    def test_skips_exhausted_category_and_continues(self):
+        ranked = [
+            _make_categorized_item("t1", "tops", 1.0),
+            _make_categorized_item("b1", "bottoms", 0.9),
+            _make_categorized_item("b2", "bottoms", 0.8),
+            _make_categorized_item("b3", "bottoms", 0.7),
+        ]
+        result = _balance_by_category(ranked, top_k=4)
+        ids = [item.item_id for item, _ in result]
+        assert "t1" in ids
+        # After tops exhausted, remaining slots should be filled from bottoms
+        assert len(result) == 4
+
+    def test_items_missing_category_grouped_under_other(self):
+        ranked = [
+            _make_categorized_item("x1", "tops", 1.0),
+            (
+                Item(
+                    item_id="no-cat",
+                    domain="fashion",
+                    title="No cat",
+                    price=5.0,
+                    image_url="",
+                    product_url="",
+                    source="poshmark_seed",
+                    embedding=None,
+                    attributes={},
+                ),
+                0.5,
+            ),
+        ]
+        result = _balance_by_category(ranked, top_k=2)
+        assert len(result) == 2
+
+    def test_preserves_score_order_within_category(self):
+        ranked = [
+            _make_categorized_item("t1", "tops", 1.0),
+            _make_categorized_item("t2", "tops", 0.5),
+            _make_categorized_item("b1", "bottoms", 0.8),
+        ]
+        result = _balance_by_category(ranked, top_k=3)
+        tops_in_result = [(item, score) for item, score in result if item.attributes.get("category") == "tops"]
+        if len(tops_in_result) == 2:
+            assert tops_in_result[0][1] > tops_in_result[1][1]
+
+    def test_empty_input_returns_empty(self):
+        assert _balance_by_category([], top_k=5) == []

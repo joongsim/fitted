@@ -128,6 +128,44 @@ def _load_towers_from_s3(s3_client, bucket: str) -> Optional[dict]:
         return None
 
 
+def _balance_by_category(
+    ranked: list[tuple["Item", float]],
+    top_k: int,
+) -> list[tuple["Item", float]]:
+    """
+    Return up to top_k items with a best-effort balanced mix of categories.
+
+    Algorithm: group by category, then round-robin across groups picking the
+    highest-scored item from each until top_k is reached or all groups are
+    exhausted. Items with no category attribute are grouped under 'other'.
+    """
+    from collections import defaultdict
+
+    groups: dict[str, list[tuple["Item", float]]] = defaultdict(list)
+    for item, score in ranked:
+        cat = item.attributes.get("category", "other")
+        groups[cat].append((item, score))
+
+    # groups are already in descending score order (ranked is pre-sorted)
+    group_iters = {cat: iter(items) for cat, items in groups.items()}
+    active_cats = list(group_iters.keys())
+
+    result: list[tuple["Item", float]] = []
+    while len(result) < top_k and active_cats:
+        exhausted = []
+        for cat in active_cats:
+            if len(result) >= top_k:
+                break
+            try:
+                result.append(next(group_iters[cat]))
+            except StopIteration:
+                exhausted.append(cat)
+        for cat in exhausted:
+            active_cats.remove(cat)
+
+    return result
+
+
 class RecommendationService:
     """
     Orchestrates the full recommendation pipeline:
