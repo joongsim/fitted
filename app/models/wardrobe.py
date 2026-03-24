@@ -6,33 +6,32 @@ from typing import Literal, Optional
 from pydantic import BaseModel, ConfigDict
 
 CategoryType = Literal["tops", "bottoms", "outerwear", "shoes", "accessories"]
+EmbeddingStatusType = Literal["pending", "embedding", "done", "failed"]
 
 
 class WardrobeItemCreate(BaseModel):
-    """Request body for creating a new wardrobe item (metadata only; image is multipart)."""
-
     name: str
     category: Optional[CategoryType] = None
 
 
 class WardrobeItemUpdate(BaseModel):
-    """Request body for updating wardrobe item metadata (all fields optional)."""
-
     name: Optional[str] = None
     category: Optional[CategoryType] = None
     tags: Optional[list[str]] = None
 
 
 class WardrobeItemResponse(BaseModel):
-    """JSON-serialisable representation of a wardrobe item returned by the API."""
-
     item_id: str
     name: str
     category: Optional[str]
-    image_url: Optional[
-        str
-    ]  # presigned S3 GET URL (1 h expiry); None when no image uploaded
+    image_url: Optional[str]
     tags: list[str]
     created_at: datetime
+    embedding_status: EmbeddingStatusType = "pending"
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class WardrobeItemStatusResponse(BaseModel):
+    item_id: str
+    embedding_status: EmbeddingStatusType

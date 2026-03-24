@@ -468,3 +468,41 @@ class TestOutfitSuggestion:
         )
         d = o.model_dump()
         assert set(d.keys()) == {"top", "bottom", "outerwear", "accessories"}
+
+
+# ===========================================================================
+# WardrobeItemResponse / WardrobeItemStatusResponse embedding_status
+# ===========================================================================
+
+
+def test_wardrobe_item_response_has_embedding_status():
+    from app.models.wardrobe import WardrobeItemResponse
+    from datetime import datetime, timezone
+    item = WardrobeItemResponse(
+        item_id="abc",
+        name="Blazer",
+        category=None,
+        image_url=None,
+        tags=[],
+        created_at=datetime(2024, 1, 1, tzinfo=timezone.utc),
+        embedding_status="pending",
+    )
+    assert item.embedding_status == "pending"
+
+
+def test_wardrobe_item_status_response_model():
+    from app.models.wardrobe import WardrobeItemStatusResponse
+    r = WardrobeItemStatusResponse(item_id="abc", embedding_status="done")
+    assert r.embedding_status == "done"
+
+
+def test_embedding_status_rejects_invalid_value():
+    from app.models.wardrobe import WardrobeItemResponse
+    from datetime import datetime, timezone
+    import pytest
+    with pytest.raises(Exception):
+        WardrobeItemResponse(
+            item_id="x", name="x", category=None, image_url=None,
+            tags=[], created_at=datetime(2024,1,1,tzinfo=timezone.utc),
+            embedding_status="bogus",
+        )
