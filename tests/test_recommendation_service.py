@@ -752,8 +752,8 @@ class TestBalanceByCategory:
         ]
         result = _balance_by_category(ranked, top_k=3)
         tops_in_result = [(item, score) for item, score in result if item.attributes.get("category") == "tops"]
-        if len(tops_in_result) == 2:
-            assert tops_in_result[0][1] > tops_in_result[1][1]
+        assert len(tops_in_result) == 2
+        assert tops_in_result[0][1] > tops_in_result[1][1]
 
     def test_empty_input_returns_empty(self):
         assert _balance_by_category([], top_k=5) == []

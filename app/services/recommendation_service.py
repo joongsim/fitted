@@ -2,6 +2,7 @@
 
 import io
 import logging
+from collections import defaultdict
 from typing import Optional
 
 import numpy as np
@@ -139,8 +140,6 @@ def _balance_by_category(
     highest-scored item from each until top_k is reached or all groups are
     exhausted. Items with no category attribute are grouped under 'other'.
     """
-    from collections import defaultdict
-
     groups: dict[str, list[tuple["Item", float]]] = defaultdict(list)
     for item, score in ranked:
         cat = item.attributes.get("category", "other")
