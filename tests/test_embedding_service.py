@@ -100,7 +100,7 @@ def test_encode_text_uses_remote_when_env_var_set():
     mock_response.json.return_value = {"embedding": fake_embedding}
     mock_response.raise_for_status = MagicMock()
 
-    with patch.dict(os.environ, {"EMBEDDING_SERVICE_URL": "http://localhost:8001"}):
+    with patch.dict(os.environ, {"EMBEDDING_SERVICE_URL": "http://localhost:8002"}):
         with patch("httpx.post", return_value=mock_response) as mock_post:
             result = embedding_service.encode_text("blue shirt")
 
@@ -137,7 +137,7 @@ def test_encode_image_sends_bytes_to_remote():
     mock_requests_response.content = fake_jpeg
     mock_requests_response.raise_for_status = MagicMock()
 
-    with patch.dict(os.environ, {"EMBEDDING_SERVICE_URL": "http://localhost:8001"}):
+    with patch.dict(os.environ, {"EMBEDDING_SERVICE_URL": "http://localhost:8002"}):
         with patch("requests.get", return_value=mock_requests_response):
             with patch("httpx.post", return_value=mock_httpx_response) as mock_post:
                 result = embedding_service.encode_image("https://example.com/img.jpg")
@@ -354,7 +354,7 @@ def test_encode_image_s3_key_sends_bytes_to_remote():
     mock_body.read.return_value = fake_jpeg
     mock_s3_client.get_object.return_value = {"Body": mock_body}
 
-    with patch.dict(os.environ, {"EMBEDDING_SERVICE_URL": "http://localhost:8001", "S3_BUCKET": "fitted-app-bucket"}):
+    with patch.dict(os.environ, {"EMBEDDING_SERVICE_URL": "http://localhost:8002", "S3_BUCKET": "fitted-app-bucket"}):
         with patch("boto3.client", return_value=mock_s3_client):
             with patch("httpx.post", return_value=mock_httpx_response) as mock_post:
                 result = embedding_service.encode_image("wardrobe-images/user/item.jpg")

@@ -22,11 +22,16 @@ EC2_HOST ?= fitted
 tunnel:
 	ssh $(EC2_HOST) -N -L 5432:localhost:5432
 
-tunnel-embed:
-	ssh -o ExitOnForwardFailure=yes -R 8001:localhost:8001 $(EC2_HOST)
+tunnel-embed: _wait-embed-server
+	ssh -o ExitOnForwardFailure=yes -R 8002:localhost:8002 $(EC2_HOST)
 
 embed-server:
 	$(PYTHON) scripts/embedding_server.py $(ARGS)
+
+_wait-embed-server:
+	@echo "Waiting for embed server to be ready..."
+	@until curl -sf http://localhost:8002/health | grep -q '"model_loaded":true'; do sleep 2; done
+	@echo "Embed server ready."
 
 # ── ML scripts ────────────────────────────────────────────────────────────────
 

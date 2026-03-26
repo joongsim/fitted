@@ -1,20 +1,21 @@
 """Local CLIP embedding server — run on your GPU machine, tunnel to EC2.
 
 Usage:
-    python scripts/embedding_server.py           # port 8001
+    python scripts/embedding_server.py           # port 8002
     python scripts/embedding_server.py --port 9000
 
 SSH tunnel (on local machine):
-    ssh -R 8001:localhost:8001 ec2-user@<EC2_IP>
+    ssh -R 8002:localhost:8002 ec2-user@<EC2_IP>
 
 Then set on EC2 systemd service:
-    Environment="EMBEDDING_SERVICE_URL=http://localhost:8001"
+    Environment="EMBEDDING_SERVICE_URL=http://localhost:8002"
 """
 
 import argparse
 import io
 import logging
 import threading
+from contextlib import asynccontextmanager
 
 import numpy as np
 import uvicorn
@@ -25,7 +26,14 @@ from pydantic import BaseModel
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Fitted Embedding Server")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    _load_model()
+    yield
+
+
+app = FastAPI(title="Fitted Embedding Server", lifespan=lifespan)
 
 # Module-level singletons
 _model = None
@@ -106,7 +114,7 @@ def health() -> dict:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--port", type=int, default=8001)
+    parser.add_argument("--port", type=int, default=8002)
     parser.add_argument("--host", default="127.0.0.1")
     args = parser.parse_args()
     if args.host != "127.0.0.1":
