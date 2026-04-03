@@ -5,7 +5,7 @@ import logging
 import pathlib
 from typing import Optional
 
-from app.models.catalog_item import CatalogItemCreate, make_content_hash
+from app.models.catalog_item import CatalogItemCreate
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +90,6 @@ def parse_annotation(
     stem = anno_path.stem  # e.g. "000001"
     item_id = f"df2_{split}_{stem}"
     title = raw_category.title()  # "Short Sleeve Top"
-    content_hash = make_content_hash(title, 0.0, "", app_category)
 
     return CatalogItemCreate(
         item_id=item_id,
@@ -100,7 +99,7 @@ def parse_annotation(
         image_url="",  # filled in after S3 upload
         product_url="",
         source="deepfashion2",
-        content_hash=content_hash,
+        content_hash=None,
         attributes={
             "category": app_category,
             "source_category": raw_category,

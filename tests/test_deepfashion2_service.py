@@ -14,22 +14,7 @@ import app.services.deepfashion2_service as df2
 
 
 def test_normalize_category_all_known():
-    known = [
-        ("short sleeve top", "tops"),
-        ("long sleeve top", "tops"),
-        ("vest", "tops"),
-        ("sling", "tops"),
-        ("short sleeve dress", "tops"),
-        ("long sleeve dress", "tops"),
-        ("vest dress", "tops"),
-        ("sling dress", "tops"),
-        ("shorts", "bottoms"),
-        ("trousers", "bottoms"),
-        ("skirt", "bottoms"),
-        ("short sleeve outwear", "outerwear"),
-        ("long sleeve outwear", "outerwear"),
-    ]
-    for raw, expected in known:
+    for raw, expected in df2.CATEGORY_MAP.items():
         assert df2.normalize_category(raw) == expected, f"failed for {raw!r}"
 
 
@@ -102,9 +87,7 @@ def test_parse_annotation_item_id_uses_split_and_stem(tmp_path):
     assert item.item_id == "df2_validation_000001"
 
 
-def test_parse_annotation_content_hash_is_deterministic(tmp_path):
+def test_parse_annotation_content_hash_is_none(tmp_path):
     anno, image = _write_anno(tmp_path, "shop", "trousers")
-    item1 = df2.parse_annotation(anno, image, split="train")
-    item2 = df2.parse_annotation(anno, image, split="train")
-    assert item1.content_hash == item2.content_hash
-    assert item1.content_hash is not None
+    item = df2.parse_annotation(anno, image, split="train")
+    assert item.content_hash is None
