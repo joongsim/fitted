@@ -1392,3 +1392,59 @@ class TestAuthRefresh:
             )
 
         assert resp.status_code == 200
+
+
+# ── embedding_status in POST /wardrobe response ───────────────────────────
+
+class TestWardrobeEmbeddingStatus:
+    def test_post_wardrobe_response_includes_embedding_status(self, client, valid_jwt_token):
+        """POST /wardrobe response must include embedding_status field."""
+        from unittest.mock import patch, AsyncMock
+        from datetime import datetime, timezone
+
+        item_dict = {
+            "item_id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+            "name": "Test Blazer",
+            "category": "outerwear",
+            "image_s3_key": None,
+            "tags": [],
+            "created_at": datetime(2024, 1, 1, tzinfo=timezone.utc),
+            "embedding_status": "pending",
+        }
+        with patch("app.main.wardrobe_service") as mock_ws, \
+             patch("app.main.auth.get_current_user_id", return_value="user-123"):
+            mock_ws.create_wardrobe_item = AsyncMock(return_value=item_dict)
+            resp = client.post(
+                "/wardrobe",
+                data={"name": "Test Blazer"},
+                headers={"Authorization": f"Bearer {valid_jwt_token}"},
+            )
+        assert resp.status_code == 201
+        assert "embedding_status" in resp.json()
+
+    def test_get_wardrobe_item_status_returns_200(self, client, valid_jwt_token):
+        from unittest.mock import patch, AsyncMock
+
+        with patch("app.main.wardrobe_service") as mock_ws, \
+             patch("app.main.auth.get_current_user_id", return_value="user-123"):
+            mock_ws.get_wardrobe_item_status = AsyncMock(return_value="done")
+            resp = client.get(
+                "/wardrobe/some-item-id/status",
+                headers={"Authorization": f"Bearer {valid_jwt_token}"},
+            )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["item_id"] == "some-item-id"
+        assert body["embedding_status"] == "done"
+
+    def test_get_wardrobe_item_status_returns_404_when_not_found(self, client, valid_jwt_token):
+        from unittest.mock import patch, AsyncMock
+
+        with patch("app.main.wardrobe_service") as mock_ws, \
+             patch("app.main.auth.get_current_user_id", return_value="user-123"):
+            mock_ws.get_wardrobe_item_status = AsyncMock(return_value=None)
+            resp = client.get(
+                "/wardrobe/nonexistent/status",
+                headers={"Authorization": f"Bearer {valid_jwt_token}"},
+            )
+        assert resp.status_code == 404

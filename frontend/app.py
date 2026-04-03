@@ -373,6 +373,17 @@ custom_css = Style(
         width: 100%;
     }
     .wardrobe-card-delete:hover { background-color: #fef2f2; }
+    .badge {
+        display: inline-block;
+        font-size: 0.7rem;
+        padding: 0.15rem 0.4rem;
+        border-radius: 3px;
+        margin-bottom: 0.25rem;
+        font-weight: bold;
+    }
+    .badge-pending { background: #fef9c3; color: #854d0e; border: 1px solid #fde047; }
+    .badge-done    { background: #dcfce7; color: #166534; border: 1px solid #86efac; }
+    .badge-failed  { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
     .wardrobe-empty {
         text-align: center;
         color: #64748b;
@@ -1165,13 +1176,33 @@ def wardrobe_card(item: dict) -> Div:
     """A single wardrobe item card with thumbnail and delete button."""
     item_id = item["item_id"]
     image_url = item.get("image_url")
+    embedding_status = item.get("embedding_status", "pending")
+
     thumbnail = (
         Img(src=image_url, alt=item["name"])
         if image_url
         else Div("👔", cls="wardrobe-card-placeholder")
     )
+
+    # Build the status badge
+    if embedding_status in ("pending", "embedding"):
+        status_badge = Span(
+            f"⏳ {embedding_status}",
+            id=f"embed-status-{item_id}",
+            cls="badge badge-pending",
+            hx_get=f"/wardrobe/{item_id}/status",
+            hx_trigger="every 2s",
+            hx_target="this",
+            hx_swap="outerHTML",
+        )
+    elif embedding_status == "done":
+        status_badge = Span("✓ ready", id=f"embed-status-{item_id}", cls="badge badge-done")
+    else:
+        status_badge = Span("✗ failed", id=f"embed-status-{item_id}", cls="badge badge-failed")
+
     return Div(
         thumbnail,
+        status_badge,
         Div(item["name"], cls="wardrobe-card-name"),
         Div(item.get("category") or "—", cls="wardrobe-card-category"),
         Button(
@@ -1362,6 +1393,27 @@ async def wardrobe_delete(item_id: str, session):
     except Exception:
         logger.error("Wardrobe delete request failed.", exc_info=True)
     return ""  # HTMX replaces the card element with nothing
+
+
+@app.get("/wardrobe/{item_id}/status")
+async def wardrobe_item_status(item_id: str, session):
+    """HTMX fragment: proxy embedding status badge from backend."""
+    if "access_token" not in session:
+        return ""
+    token = session["access_token"]
+    headers = {"Authorization": f"Bearer {token}", "HX-Request": "true"}
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f"{API_BASE_URL}/wardrobe/{item_id}/status",
+                headers=headers,
+                timeout=5.0,
+            )
+            if resp.status_code == 200:
+                return NotStr(resp.text)
+    except Exception:
+        logger.error("Status poll failed for item_id=%s", item_id, exc_info=True)
+    return ""
 
 
 # --- Interaction Logging (fire-and-forget from product cards) ---

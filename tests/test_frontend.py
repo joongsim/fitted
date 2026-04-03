@@ -720,3 +720,60 @@ class TestRefreshTokenBeforeware:
         resp = tc.get("/wardrobe")
         assert resp.status_code in (302, 303)
         assert "/login" in resp.headers.get("location", "")
+
+
+# ---------------------------------------------------------------------------
+# GET /wardrobe/{item_id}/status
+# ---------------------------------------------------------------------------
+
+
+class TestWardrobeItemStatus:
+    def test_unauthenticated_returns_empty(self, client):
+        """No access_token in session → route returns empty string."""
+        response = client.get("/wardrobe/item-123/status")
+        assert response.status_code == 200
+        assert response.text == ""
+
+    def test_returns_html_on_backend_200(self, authed_client):
+        """Backend returns 200 with HTML body → route returns that HTML."""
+        html_body = '<span class="badge">ready</span>'
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.text = html_body
+
+        with patch("httpx.AsyncClient") as mock_http:
+            mock_instance = AsyncMock()
+            mock_http.return_value.__aenter__.return_value = mock_instance
+            mock_instance.get.return_value = mock_resp
+            response = authed_client.get("/wardrobe/item-123/status")
+
+        assert response.status_code == 200
+        assert html_body.encode() in response.content
+
+    def test_returns_empty_on_backend_non_200(self, authed_client):
+        """Backend returns 404 → route returns empty string."""
+        mock_resp = MagicMock()
+        mock_resp.status_code = 404
+        mock_resp.text = "Not Found"
+
+        with patch("httpx.AsyncClient") as mock_http:
+            mock_instance = AsyncMock()
+            mock_http.return_value.__aenter__.return_value = mock_instance
+            mock_instance.get.return_value = mock_resp
+            response = authed_client.get("/wardrobe/item-123/status")
+
+        assert response.status_code == 200
+        assert response.text == ""
+
+    def test_returns_empty_on_exception(self, authed_client):
+        """httpx.ConnectError during backend call → route returns empty string."""
+        import httpx as _httpx
+
+        with patch("httpx.AsyncClient") as mock_http:
+            mock_instance = AsyncMock()
+            mock_http.return_value.__aenter__.return_value = mock_instance
+            mock_instance.get.side_effect = _httpx.ConnectError("refused")
+            response = authed_client.get("/wardrobe/item-456/status")
+
+        assert response.status_code == 200
+        assert response.text == ""
