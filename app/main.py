@@ -996,7 +996,6 @@ async def get_wardrobe_item_status(
     partial instead of JSON. Polling stops automatically when the badge for
     terminal states (done/failed) omits hx-trigger.
     """
-    from app.services import wardrobe_service
     from app.models.wardrobe import WardrobeItemStatusResponse
     from fastapi.responses import HTMLResponse
 
