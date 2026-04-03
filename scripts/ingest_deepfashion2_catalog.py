@@ -186,7 +186,7 @@ def ingest(args: argparse.Namespace) -> None:
 
     try:
         for anno_path in anno_paths:
-            if args.max_items and (total_parsed + total_skipped) >= args.max_items:
+            if args.max_items and total_parsed >= args.max_items:
                 break
 
             stem = anno_path.stem
@@ -204,11 +204,10 @@ def ingest(args: argparse.Namespace) -> None:
                 continue
 
             s3_url = upload_image(image_path, item.item_id, s3_client, bucket)
-            if s3_url:
-                item = item.model_copy(update={"image_url": s3_url})
-            else:
+            if not s3_url:
                 total_failed_images += 1
-
+                continue
+            item = item.model_copy(update={"image_url": s3_url})
             batch.append(item)
 
             if len(batch) >= args.batch_size:
@@ -280,7 +279,7 @@ def main() -> None:
         type=int,
         default=0,
         metavar="N",
-        help="Stop after processing N annotation files (0 = unlimited).",
+        help="Stop after ingesting N items (0 = unlimited).",
     )
     parser.add_argument(
         "--batch-size",
