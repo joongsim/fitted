@@ -287,3 +287,208 @@ def bulk_upsert(
                 updated += 1
     conn.commit()
     return inserted, updated
+
+
+# ---------------------------------------------------------------------------
+# Main ingestion coroutine
+# ---------------------------------------------------------------------------
+
+
+async def ingest(args: argparse.Namespace) -> None:
+    """Main ingestion loop: iterate over brands, search, download, upsert."""
+    # Load brand list
+    brands_path = pathlib.Path(args.brands_file).resolve()
+    if not brands_path.exists():
+        logger.error("Brand list not found: %s", brands_path)
+        sys.exit(1)
+    with open(brands_path) as f:
+        brands: list[str] = json.load(f).get("brands", [])
+    if not brands:
+        logger.error("Brand list is empty")
+        sys.exit(1)
+    logger.info("Loaded %d brands from %s", len(brands), brands_path)
+
+    # Load config
+    api_key = os.environ.get("SERPER_API_KEY", "")
+    if not api_key:
+        logger.error("SERPER_API_KEY is not set")
+        sys.exit(1)
+
+    database_url = config.database_url
+    bucket = os.environ.get("WEATHER_BUCKET_NAME", "")
+    if not bucket:
+        try:
+            bucket = config.weather_bucket_name
+        except Exception:
+            bucket = ""
+    if not bucket and not args.dry_run:
+        logger.error("WEATHER_BUCKET_NAME is not set — cannot write to S3")
+        sys.exit(1)
+
+    # Initialize S3 client
+    s3_client = None
+    if not args.dry_run:
+        try:
+            region = os.environ.get("AWS_DEFAULT_REGION", "us-west-1")
+            s3_client = boto3.client("s3", region_name=region)
+        except Exception:
+            logger.error("Failed to initialize S3 client", exc_info=True)
+            sys.exit(1)
+
+    # Open DB connection
+    conn = None
+    if not args.dry_run:
+        logger.info("Connecting to database...")
+        conn = psycopg.connect(database_url)
+
+    image_sem = asyncio.Semaphore(10)
+
+    total_fetched = 0
+    total_skipped = 0
+    total_inserted = 0
+    total_updated = 0
+    total_failed_images = 0
+    total_dry_run_count = 0
+
+    try:
+        for brand in brands:
+            query = f"{brand} menswear"
+            logger.info("=== Brand: %r | Query: %r ===", brand, query)
+
+            await asyncio.sleep(0.5)  # rate limit: 0.5s between API calls
+
+            try:
+                raw_results = await search_shopping(query, api_key)
+            except Exception:
+                logger.error("API error for brand=%r — skipping", brand, exc_info=True)
+                continue
+
+            logger.info("Fetched %d results for %r", len(raw_results), brand)
+            total_fetched += len(raw_results)
+
+            # Store raw JSON to S3 bronze layer
+            if not args.dry_run and s3_client and bucket:
+                store_bronze_json(raw_results, brand, s3_client, bucket)
+
+            # Parse results
+            parsed_items = []
+            for raw in raw_results:
+                item = parse_result(raw, brand=brand)
+                if item is None:
+                    total_skipped += 1
+                    continue
+                parsed_items.append((raw, item))
+
+            logger.info(
+                "Parsed %d valid items from %d results (skipped %d)",
+                len(parsed_items),
+                len(raw_results),
+                len(raw_results) - len(parsed_items),
+            )
+
+            if args.dry_run:
+                total_dry_run_count += len(parsed_items)
+                logger.info(
+                    "[DRY RUN] Would upsert %d items (running total: %d)",
+                    len(parsed_items),
+                    total_dry_run_count,
+                )
+                if args.max_items and total_dry_run_count >= args.max_items:
+                    logger.info("Reached --max-items=%d — stopping", args.max_items)
+                    return
+                continue
+
+            # Download images in parallel
+            image_tasks = [
+                download_image(
+                    url=raw.get("imageUrl", ""),
+                    item_id=item.item_id,
+                    s3_client=s3_client,
+                    bucket=bucket,
+                    sem=image_sem,
+                )
+                for raw, item in parsed_items
+            ]
+            image_urls = await asyncio.gather(*image_tasks)
+
+            # Attach S3 URLs and upsert
+            upsert_batch = []
+            for (raw, item), s3_url in zip(parsed_items, image_urls):
+                if s3_url:
+                    item = item.model_copy(update={"image_url": s3_url})
+                else:
+                    total_failed_images += 1
+                upsert_batch.append(item)
+
+            inserted, updated = bulk_upsert(conn, upsert_batch, dry_run=False)
+            total_inserted += inserted
+            total_updated += updated
+
+            logger.info(
+                "Upserted %d items (inserted=%d updated=%d) — total: %d",
+                len(upsert_batch),
+                inserted,
+                updated,
+                total_inserted + total_updated,
+            )
+
+            if args.max_items and (total_inserted + total_updated) >= args.max_items:
+                logger.info("Reached --max-items=%d — stopping", args.max_items)
+                return
+
+    finally:
+        if conn:
+            conn.close()
+
+    logger.info(
+        "\n=== Ingestion complete ===\n"
+        "  Fetched:         %d raw results\n"
+        "  Skipped:         %d (parse failures / non-USD)\n"
+        "  Inserted (new):  %d\n"
+        "  Updated (dupe):  %d\n"
+        "  Failed images:   %d",
+        total_fetched,
+        total_skipped,
+        total_inserted,
+        total_updated,
+        total_failed_images,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Ingest menswear brands from Google Shopping via Serper API."
+    )
+    parser.add_argument(
+        "--brands-file",
+        default="config/serper_brands.json",
+        metavar="PATH",
+        help="Path to brand list JSON (default: config/serper_brands.json).",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Parse and log without writing to S3 or the database.",
+    )
+    parser.add_argument(
+        "--max-items",
+        type=int,
+        default=0,
+        metavar="N",
+        help="Stop after N total items upserted (0 = unlimited).",
+    )
+    args = parser.parse_args()
+
+    if args.dry_run:
+        logger.info("=== DRY RUN MODE — no S3 writes or DB upserts ===")
+
+    asyncio.run(ingest(args))
+
+
+if __name__ == "__main__":
+    main()
