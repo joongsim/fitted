@@ -152,7 +152,62 @@ async def search_shopping(query: str, api_key: str) -> list[dict]:
     return data.get("shopping", [])
 
 
-async def download_image(url, item_id, s3_client, bucket, sem): ...
+async def download_image(
+    url: str,
+    item_id: str,
+    s3_client,
+    bucket: str,
+    sem: asyncio.Semaphore,
+) -> Optional[str]:
+    """
+    Download a product image and upload it to S3.
+
+    Returns the S3 URL (s3://bucket/key) on success, or None on any failure.
+    Validates content-type (must be image/*) and size (max 5 MB).
+    """
+    async with sem:
+        try:
+            async with httpx.AsyncClient(
+                timeout=REQUEST_TIMEOUT, follow_redirects=True
+            ) as client:
+                async with client.stream("GET", url) as response:
+                    response.raise_for_status()
+                    content_type = response.headers.get("content-type", "")
+                    if not content_type.startswith("image/"):
+                        logger.warning(
+                            "Skipping %s — non-image content-type: %r",
+                            item_id,
+                            content_type,
+                        )
+                        return None
+
+                    chunks = []
+                    total = 0
+                    async for chunk in response.aiter_bytes(8192):
+                        total += len(chunk)
+                        if total > MAX_IMAGE_BYTES:
+                            logger.warning(
+                                "Skipping %s — image exceeds 5 MB", item_id
+                            )
+                            return None
+                        chunks.append(chunk)
+
+                    image_data = b"".join(chunks)
+
+            s3_key = f"images/catalog/serper/{item_id}.jpg"
+            s3_client.put_object(
+                Bucket=bucket,
+                Key=s3_key,
+                Body=image_data,
+                ContentType="image/jpeg",
+            )
+            return f"s3://{bucket}/{s3_key}"
+
+        except Exception:
+            logger.warning(
+                "Failed to download/upload image for %s", item_id, exc_info=True
+            )
+            return None
 
 
 def store_bronze_json(results, brand, s3_client, bucket): ...
