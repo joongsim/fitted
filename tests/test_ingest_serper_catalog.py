@@ -176,6 +176,7 @@ class TestParseResult:
 
 
 class TestSearchShopping:
+    @pytest.mark.asyncio
     async def test_returns_shopping_list(self):
         mock_response = MagicMock()
         mock_response.raise_for_status = MagicMock()
@@ -194,6 +195,7 @@ class TestSearchShopping:
         assert len(results) == 2
         assert results[0]["title"] == MOCK_SERPER_RESULT["title"]
 
+    @pytest.mark.asyncio
     async def test_sends_correct_query(self):
         mock_response = MagicMock()
         mock_response.raise_for_status = MagicMock()
@@ -211,6 +213,7 @@ class TestSearchShopping:
         assert call_kwargs.kwargs["json"] == {"q": "Acne Studios menswear"}
         assert call_kwargs.kwargs["headers"]["X-API-KEY"] == "test-key"
 
+    @pytest.mark.asyncio
     async def test_empty_shopping_key_returns_empty_list(self):
         mock_response = MagicMock()
         mock_response.raise_for_status = MagicMock()
@@ -259,6 +262,7 @@ def _make_streaming_response(status_code: int, content_type: str, body: bytes):
 
 
 class TestDownloadImage:
+    @pytest.mark.asyncio
     async def test_success_returns_s3_url(self):
         image_bytes = b"\xff\xd8\xff" + b"x" * 100  # fake JPEG
         mock_s3 = MagicMock()
@@ -281,6 +285,7 @@ class TestDownloadImage:
         call_kwargs = mock_s3.put_object.call_args.kwargs
         assert call_kwargs["Key"] == "images/catalog/serper/serper_abc123.jpg"
 
+    @pytest.mark.asyncio
     async def test_non_image_content_type_returns_none(self):
         mock_s3 = MagicMock()
         sem = asyncio.Semaphore(10)
@@ -300,6 +305,7 @@ class TestDownloadImage:
         assert result is None
         mock_s3.put_object.assert_not_called()
 
+    @pytest.mark.asyncio
     async def test_image_too_large_returns_none(self):
         large_body = b"x" * (5 * 1024 * 1024 + 1)
         mock_s3 = MagicMock()
@@ -319,6 +325,7 @@ class TestDownloadImage:
 
         assert result is None
 
+    @pytest.mark.asyncio
     async def test_http_error_returns_none(self):
         mock_s3 = MagicMock()
         sem = asyncio.Semaphore(10)

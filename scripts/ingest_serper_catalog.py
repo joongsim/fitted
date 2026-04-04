@@ -40,7 +40,6 @@ from typing import Optional
 
 import boto3
 import httpx
-import psycopg
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
 
@@ -339,6 +338,7 @@ async def ingest(args: argparse.Namespace) -> None:
     conn = None
     if not args.dry_run:
         logger.info("Connecting to database...")
+        import psycopg
         conn = psycopg.connect(database_url)
 
     image_sem = asyncio.Semaphore(10)
