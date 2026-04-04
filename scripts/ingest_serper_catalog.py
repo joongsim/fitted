@@ -131,7 +131,25 @@ def parse_result(result: dict, brand: str) -> Optional[CatalogItemCreate]:
     )
 
 
-async def search_shopping(query: str, api_key: str) -> list: ...
+async def search_shopping(query: str, api_key: str) -> list[dict]:
+    """
+    Call Serper Google Shopping API and return the raw results list.
+
+    Raises httpx.HTTPStatusError on non-2xx responses.
+    """
+    headers = {
+        "X-API-KEY": api_key,
+        "Content-Type": "application/json",
+    }
+    async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
+        response = await client.post(
+            SERPER_SHOPPING_URL,
+            headers=headers,
+            json={"q": query},
+        )
+        response.raise_for_status()
+        data = response.json()
+    return data.get("shopping", [])
 
 
 async def download_image(url, item_id, s3_client, bucket, sem): ...
