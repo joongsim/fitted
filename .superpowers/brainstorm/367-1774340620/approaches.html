@@ -1,0 +1,40 @@
+<h2>3 Approaches to Harmonize the Palette</h2>
+<p class="subtitle">All three apply the same visual changes — they differ in <em>how</em> the CSS is structured.</p>
+
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Surgical patch <span style="background:#95FB62;padding:0.1rem 0.4rem;font-size:0.75rem;border:1px solid #000;">RECOMMENDED</span></h3>
+      <p>Find and fix each broken value directly in the existing CSS string. No restructuring, no new abstractions — just replace the 8 offending values.</p>
+      <div class="pros-cons" style="margin-top:0.5rem">
+        <div class="pros"><h4>Pros</h4><ul><li>Minimal change surface</li><li>Easy to review</li><li>No risk of regressions</li></ul></div>
+        <div class="cons"><h4>Cons</h4><ul><li>Colors still hardcoded everywhere</li><li>Next color change requires same effort</li></ul></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>CSS variable refactor</h3>
+      <p>Define named tokens in <code>:root</code> (<code>--color-accent</code>, <code>--color-hover</code>, etc.), then replace all hardcoded values with var() references.</p>
+      <div class="pros-cons" style="margin-top:0.5rem">
+        <div class="pros"><h4>Pros</h4><ul><li>Future color changes = 1 line</li><li>Self-documenting palette</li></ul></div>
+        <div class="cons"><h4>Cons</h4><ul><li>Larger diff, more to review</li><li>Pico CSS vars may conflict with naming</li></ul></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="c" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>Extract to static CSS file</h3>
+      <p>Move all styles out of the Python string into <code>frontend/assets/style.css</code>, served as a static file. Then apply the palette fixes.</p>
+      <div class="pros-cons" style="margin-top:0.5rem">
+        <div class="pros"><h4>Pros</h4><ul><li>Syntax highlighting, linting</li><li>Cleaner app.py</li></ul></div>
+        <div class="cons"><h4>Cons</h4><ul><li>Biggest scope change</li><li>Requires static file serving setup</li><li>Out of scope for color polish</li></ul></div>
+      </div>
+    </div>
+  </div>
+</div>

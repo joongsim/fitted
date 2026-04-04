@@ -1,6 +1,6 @@
 # Fitted — Engineering Plan
 
-**Status:** Week 8 training pipeline + affiliate monetization Phase 1 complete
+**Status:** Password reset + token refresh + category filter + embedding status infrastructure complete; embedding status service/endpoint/frontend in progress
 **Stack:** FastHTML on EC2 · FastAPI on Lambda · PostgreSQL + pgvector on RDS · S3 · CLIP ViT-B/32
 
 ---
@@ -285,6 +285,40 @@ Pydantic validation, forecast support, FastHTML frontend, S3-backed caching.
 - [x] `scripts/backfill_wardrobe_embeddings.py` — idempotent batch script
 - [x] Tests: 10/10 passing
 - [x] Wire `POST /recommend-products` into frontend — `/recommendations` page + `POST /get-recommendations` HTMX endpoint; `product_card` grid; nav "Recs" link; shop button on outfit page; 40/40 frontend tests
+
+### ✅ Password Reset
+- [x] `POST /auth/forgot-password` — HMAC-SHA256 token stored in DB; AWS SES email with `DISABLE_EMAIL` dev fallback; always 200 to prevent enumeration
+- [x] `POST /auth/reset-password` — atomic token consume + password update; sets `password_changed_at` to invalidate existing JWTs
+- [x] `app/services/email_service.py` — SES integration with dev fallback
+- [x] `app/services/user_service.py` — `store_reset_token`, `reset_password` (atomic transaction)
+- [x] `app/core/auth.py` — `hash_reset_token`, `iat` in JWT, `password_changed_at` check in `get_current_user_id`
+- [x] Frontend: forgot-password page, reset-password page, HTMX flows
+- [x] slowapi rate limiting on forgot-password endpoint
+- [x] `tests/test_password_reset.py`, `tests/test_email_service.py`
+
+### ✅ Token Refresh Beforeware
+- [x] `POST /auth/refresh` — validates current JWT, checks `password_changed_at`, re-issues 24h token; accepts cookie or Bearer header
+- [x] `refresh_token_if_needed` FastHTML `Beforeware` — decodes `exp` without crypto, calls `/auth/refresh` when ≤60 min remain; redirects to `/login` on expiry/failure; HTMX-aware (`HX-Redirect`)
+- [x] `tests/test_api_endpoints.py::TestAuthRefresh`, `tests/test_frontend.py::TestRefreshTokenBeforeware`
+
+### ✅ Recommendations — Category Balance & Filter
+- [x] `dev_catalog_service.search()` — `category_filter` param with `ILIKE` on `attributes->>'category'`; applied to both primary and fallback queries
+- [x] `_balance_by_category(ranked, top_k)` — round-robin across category groups; items without category grouped as "other"
+- [x] `RecommendationService.recommend()` — `category_filter` param; bypasses vector cache when set; applies `_balance_by_category` when unfiltered
+- [x] `RecommendRequest` — `category_filter: Optional[CATEGORY_FILTER_VALUES]` with Literal validation
+- [x] Frontend `filter_bar()` — pill row with All/Tops/Bottoms/Shoes/Outerwear/Accessories; included in every `#rec-results` swap
+- [x] Tests: `TestDevCatalogCategoryFilter`, `TestBalanceByCategory`, `TestRecommend` filter tests
+
+### 🔄 Wardrobe Image Embedding Status (in progress)
+- [x] DB: `embedding_status VARCHAR(10) NOT NULL DEFAULT 'pending' CHECK (... IN ('pending','embedding','done','failed'))` column + migration in `scripts/db_migrate.py`
+- [x] Models: `EmbeddingStatusType`, `embedding_status` field on `WardrobeItemResponse`, `WardrobeItemStatusResponse` in `app/models/wardrobe.py`
+- [x] `wardrobe_service` queries (create, get one, list, update) extended to return `embedding_status`
+- [ ] Fix S3 bucket bug: `encode_image` reads from `WEATHER_BUCKET_NAME` instead of `config.s3_bucket` — wardrobe images 404
+- [ ] `wardrobe_service.embed_wardrobe_item(item_id, s3_key)` — replace inline `_embed_wardrobe_image` in `main.py`; sets status `embedding` → `done`/`failed`
+- [ ] `wardrobe_service.get_wardrobe_item_status(user_id, item_id)` — single-row status lookup
+- [ ] `GET /wardrobe/{item_id}/status` — JSON or HTML badge partial (negotiated on `HX-Request`)
+- [ ] Frontend: HTMX polling badge on `wardrobe_card`; self-terminates on terminal states
+- [ ] Tests: 7-tuple mock rows in `test_wardrobe_service.py`; new test classes for service + endpoint
 
 ### Week 8 — Training Pipeline
 - [ ] `scripts/train_two_towers.py` — interactions → triplets → `TripletMarginLoss(margin=0.2)` → `s3://fitted/models/two-towers/latest.pt`

@@ -54,7 +54,7 @@ logger = logging.getLogger("ingest_serper")
 
 SERPER_SHOPPING_URL = "https://google.serper.dev/shopping"
 REQUEST_TIMEOUT = 15.0
-MAX_IMAGE_BYTES = 5 * 1024 * 1024  # 5 MB
+MAX_IMAGE_BYTES = 15 * 1024 * 1024  # 5 MB
 
 
 # ---------------------------------------------------------------------------
@@ -94,6 +94,7 @@ def _slugify(text: str) -> str:
 # ---------------------------------------------------------------------------
 # Stubs — implemented in later tasks
 # ---------------------------------------------------------------------------
+
 
 def parse_result(result: dict, brand: str) -> Optional[CatalogItemCreate]:
     """
@@ -165,6 +166,9 @@ async def download_image(
     Validates content-type (must be image/*) and size (max 5 MB).
     """
     async with sem:
+        if not url or not url.startswith(("http://", "https://")):
+            logger.debug("Skipping image for %s — no URL", item_id)
+            return None
         try:
             async with httpx.AsyncClient(
                 timeout=REQUEST_TIMEOUT, follow_redirects=True
@@ -185,9 +189,7 @@ async def download_image(
                     async for chunk in response.aiter_bytes(8192):
                         total += len(chunk)
                         if total > MAX_IMAGE_BYTES:
-                            logger.warning(
-                                "Skipping %s — image exceeds 5 MB", item_id
-                            )
+                            logger.warning("Skipping %s — image exceeds 5 MB", item_id)
                             return None
                         chunks.append(chunk)
 
@@ -313,7 +315,9 @@ async def ingest(args: argparse.Namespace) -> None:
     except Exception:
         api_key = ""
     if not api_key:
-        logger.error("SERPER_API_KEY is not set (checked SSM /fitted/serper-api-key and env)")
+        logger.error(
+            "SERPER_API_KEY is not set (checked SSM /fitted/serper-api-key and env)"
+        )
         sys.exit(1)
 
     database_url = config.database_url
@@ -342,6 +346,7 @@ async def ingest(args: argparse.Namespace) -> None:
     if not args.dry_run:
         logger.info("Connecting to database...")
         import psycopg
+
         conn = psycopg.connect(database_url)
 
     image_sem = asyncio.Semaphore(10)
@@ -351,6 +356,7 @@ async def ingest(args: argparse.Namespace) -> None:
     total_inserted = 0
     total_updated = 0
     total_failed_images = 0
+    total_missing_images = 0
     total_dry_run_count = 0
 
     try:
@@ -419,6 +425,8 @@ async def ingest(args: argparse.Namespace) -> None:
             for (raw, item), s3_url in zip(parsed_items, image_urls):
                 if s3_url:
                     item = item.model_copy(update={"image_url": s3_url})
+                elif not raw.get("imageUrl"):
+                    total_missing_images += 1
                 else:
                     total_failed_images += 1
                 upsert_batch.append(item)
@@ -449,11 +457,13 @@ async def ingest(args: argparse.Namespace) -> None:
         "  Skipped:         %d (parse failures / non-USD)\n"
         "  Inserted (new):  %d\n"
         "  Updated (dupe):  %d\n"
+        "  No image URL:    %d\n"
         "  Failed images:   %d",
         total_fetched,
         total_skipped,
         total_inserted,
         total_updated,
+        total_missing_images,
         total_failed_images,
     )
 

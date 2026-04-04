@@ -148,3 +148,5 @@ docs/personal/
 frontend/.sesskey
 notebooks/recommender_playground.ipynb
 .worktrees/
+.superpowers/brainstorm/367-1774340620/.server.pid
+.superpowers/brainstorm/367-1774340620/.server-stopped

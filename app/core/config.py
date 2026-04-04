@@ -108,8 +108,13 @@ class Config:
 
     @property
     def weather_bucket_name(self) -> Optional[str]:
-        """Get Weather Data S3 bucket name from environment (set in systemd service)."""
+        """Get Weather Data S3 bucket name from SSM or environment."""
         value = os.environ.get("WEATHER_BUCKET_NAME")
+        if not value:
+            try:
+                value = self.get_parameter("/fitted/weather-bucket-name")
+            except Exception:
+                pass
         logger.debug("WEATHER_BUCKET_NAME: %s", value)
         return value or None
 

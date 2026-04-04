@@ -52,6 +52,13 @@ train:
 migrate:
 	$(RUN) scripts/db_migrate.py
 
+# ── Ingestion ─────────────────────────────────────────────────────────────────
+
+.PHONY: ingest-serper
+
+ingest-serper:
+	USE_SSM=true PYTHONPATH=. uv run python scripts/ingest_serper_catalog.py $(ARGS)
+
 # ── Misc ──────────────────────────────────────────────────────────────────────
 
 .PHONY: test format
