@@ -210,10 +210,80 @@ async def download_image(
             return None
 
 
-def store_bronze_json(results, brand, s3_client, bucket): ...
+UPSERT_SQL = """
+INSERT INTO catalog_items
+    (item_id, domain, title, price, image_url, product_url, source, content_hash, attributes)
+VALUES
+    (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+ON CONFLICT (item_id) DO UPDATE SET
+    last_seen     = NOW(),
+    hit_count     = catalog_items.hit_count + 1,
+    price         = EXCLUDED.price,
+    image_url     = COALESCE(EXCLUDED.image_url, catalog_items.image_url),
+    content_hash  = EXCLUDED.content_hash
+RETURNING item_id, (xmax = 0) AS inserted
+"""
 
 
-def bulk_upsert(conn, items, dry_run=False): ...
+def store_bronze_json(
+    results: list[dict],
+    brand: str,
+    s3_client,
+    bucket: str,
+) -> None:
+    """Store raw Serper results to the S3 bronze layer for audit."""
+    now = datetime.now(tz=timezone.utc)
+    date_str = now.strftime("%Y-%m-%d")
+    time_str = now.strftime("%H-%M-%S")
+    slug = _slugify(brand)
+    key = f"raw/catalog/serper/dt={date_str}/brand={slug}/{time_str}.json"
+    s3_client.put_object(
+        Bucket=bucket,
+        Key=key,
+        Body=json.dumps(results),
+        ContentType="application/json",
+    )
+    logger.info("Stored %d raw results to s3://%s/%s", len(results), bucket, key)
 
 
-UPSERT_SQL = ""
+def bulk_upsert(
+    conn,
+    items: list[CatalogItemCreate],
+    dry_run: bool,
+) -> tuple[int, int]:
+    """
+    Upsert a batch of CatalogItemCreate objects into catalog_items.
+
+    All values are passed via %s parameterized placeholders — no API data is
+    ever interpolated directly into the SQL string.
+
+    Returns:
+        (inserted_count, updated_count)
+    """
+    if dry_run or not items:
+        return 0, 0
+
+    inserted = updated = 0
+    with conn.cursor() as cur:
+        for item in items:
+            cur.execute(
+                UPSERT_SQL,
+                (
+                    item.item_id,
+                    item.domain,
+                    item.title,
+                    item.price,
+                    item.image_url,
+                    item.product_url,
+                    item.source,
+                    item.content_hash,
+                    json.dumps(item.attributes),
+                ),
+            )
+            row = cur.fetchone()
+            if row and row[1]:
+                inserted += 1
+            else:
+                updated += 1
+    conn.commit()
+    return inserted, updated
