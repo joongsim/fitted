@@ -75,7 +75,9 @@ class TestMakeItemId:
         assert make_item_id(url) == make_item_id(url)
 
     def test_different_urls_different_ids(self):
-        assert make_item_id("https://example.com/a") != make_item_id("https://example.com/b")
+        assert make_item_id("https://example.com/a") != make_item_id(
+            "https://example.com/b"
+        )
 
     def test_hash_matches_sha256(self):
         url = "https://example.com/product/123"
@@ -189,7 +191,9 @@ class TestSearchShopping:
         mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client.post = AsyncMock(return_value=mock_response)
 
-        with patch("scripts.ingest_serper_catalog.httpx.AsyncClient", return_value=mock_client):
+        with patch(
+            "scripts.ingest_serper_catalog.httpx.AsyncClient", return_value=mock_client
+        ):
             results = await search_shopping("Acne Studios menswear", api_key="test-key")
 
         assert len(results) == 2
@@ -206,7 +210,9 @@ class TestSearchShopping:
         mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client.post = AsyncMock(return_value=mock_response)
 
-        with patch("scripts.ingest_serper_catalog.httpx.AsyncClient", return_value=mock_client):
+        with patch(
+            "scripts.ingest_serper_catalog.httpx.AsyncClient", return_value=mock_client
+        ):
             await search_shopping("Acne Studios menswear", api_key="test-key")
 
         call_kwargs = mock_client.post.call_args
@@ -224,7 +230,9 @@ class TestSearchShopping:
         mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client.post = AsyncMock(return_value=mock_response)
 
-        with patch("scripts.ingest_serper_catalog.httpx.AsyncClient", return_value=mock_client):
+        with patch(
+            "scripts.ingest_serper_catalog.httpx.AsyncClient", return_value=mock_client
+        ):
             results = await search_shopping("Acne Studios menswear", api_key="test-key")
 
         assert results == []
@@ -280,7 +288,9 @@ class TestDownloadImage:
                 sem=sem,
             )
 
-        assert result == f"s3://{MOCK_S3_BUCKET}/images/catalog/serper/serper_abc123.jpg"
+        assert (
+            result == f"s3://{MOCK_S3_BUCKET}/images/catalog/serper/serper_abc123.jpg"
+        )
         mock_s3.put_object.assert_called_once()
         call_kwargs = mock_s3.put_object.call_args.kwargs
         assert call_kwargs["Key"] == "images/catalog/serper/serper_abc123.jpg"
@@ -307,7 +317,7 @@ class TestDownloadImage:
 
     @pytest.mark.asyncio
     async def test_image_too_large_returns_none(self):
-        large_body = b"x" * (5 * 1024 * 1024 + 1)
+        large_body = b"x" * (15 * 1024 * 1024 + 1)
         mock_s3 = MagicMock()
         sem = asyncio.Semaphore(10)
 
@@ -353,7 +363,12 @@ class TestDownloadImage:
 class TestStoreBronzeJson:
     def test_s3_key_format(self):
         mock_s3 = MagicMock()
-        store_bronze_json([MOCK_SERPER_RESULT], brand="Acne Studios", s3_client=mock_s3, bucket=MOCK_S3_BUCKET)
+        store_bronze_json(
+            [MOCK_SERPER_RESULT],
+            brand="Acne Studios",
+            s3_client=mock_s3,
+            bucket=MOCK_S3_BUCKET,
+        )
         call_kwargs = mock_s3.put_object.call_args.kwargs
         key = call_kwargs["Key"]
         assert key.startswith("raw/catalog/serper/dt=")
@@ -362,7 +377,12 @@ class TestStoreBronzeJson:
 
     def test_content_is_json(self):
         mock_s3 = MagicMock()
-        store_bronze_json([MOCK_SERPER_RESULT], brand="Acne Studios", s3_client=mock_s3, bucket=MOCK_S3_BUCKET)
+        store_bronze_json(
+            [MOCK_SERPER_RESULT],
+            brand="Acne Studios",
+            s3_client=mock_s3,
+            bucket=MOCK_S3_BUCKET,
+        )
         call_kwargs = mock_s3.put_object.call_args.kwargs
         assert call_kwargs["ContentType"] == "application/json"
         parsed = json.loads(call_kwargs["Body"])
@@ -370,7 +390,12 @@ class TestStoreBronzeJson:
 
     def test_correct_bucket(self):
         mock_s3 = MagicMock()
-        store_bronze_json([MOCK_SERPER_RESULT], brand="Acne Studios", s3_client=mock_s3, bucket=MOCK_S3_BUCKET)
+        store_bronze_json(
+            [MOCK_SERPER_RESULT],
+            brand="Acne Studios",
+            s3_client=mock_s3,
+            bucket=MOCK_S3_BUCKET,
+        )
         call_kwargs = mock_s3.put_object.call_args.kwargs
         assert call_kwargs["Bucket"] == MOCK_S3_BUCKET
 

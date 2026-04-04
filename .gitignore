@@ -17,6 +17,9 @@ plans/
 !docs/superpowers/plans/
 !docs/superpowers/specs/
 notebooks/
+.superpowers/
+
+
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
