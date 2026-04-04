@@ -95,3 +95,73 @@ class TestSlugify:
     def test_truncated_to_80(self):
         long_name = "a" * 100
         assert len(_slugify(long_name)) <= 80
+
+
+# ---------------------------------------------------------------------------
+# parse_result
+# ---------------------------------------------------------------------------
+
+MOCK_SERPER_RESULT = {
+    "title": "Acne Studios Face Logo T-Shirt",
+    "price": "$195.00",
+    "imageUrl": "https://cdn.example.com/image.jpg",
+    "link": "https://www.mrporter.com/en-us/mens/product/acne/12345",
+    "source": "Mr Porter",
+}
+
+
+class TestParseResult:
+    def test_valid_result_returns_catalog_item(self):
+        item = parse_result(MOCK_SERPER_RESULT, brand="Acne Studios")
+        assert isinstance(item, CatalogItemCreate)
+        assert item.source == "serper"
+        assert item.domain == "fashion"
+
+    def test_item_id_matches_link_hash(self):
+        item = parse_result(MOCK_SERPER_RESULT, brand="Acne Studios")
+        assert item.item_id == make_item_id(MOCK_SERPER_RESULT["link"])
+
+    def test_price_parsed_correctly(self):
+        item = parse_result(MOCK_SERPER_RESULT, brand="Acne Studios")
+        assert item.price == 195.00
+
+    def test_title_set(self):
+        item = parse_result(MOCK_SERPER_RESULT, brand="Acne Studios")
+        assert item.title == "Acne Studios Face Logo T-Shirt"
+
+    def test_brand_from_config_in_attributes(self):
+        item = parse_result(MOCK_SERPER_RESULT, brand="Acne Studios")
+        assert item.attributes["brand"] == "Acne Studios"
+
+    def test_category_menswear_in_attributes(self):
+        item = parse_result(MOCK_SERPER_RESULT, brand="Acne Studios")
+        assert item.attributes["category"] == "menswear"
+
+    def test_image_url_is_none_initially(self):
+        item = parse_result(MOCK_SERPER_RESULT, brand="Acne Studios")
+        assert item.image_url is None
+
+    def test_product_url_set(self):
+        item = parse_result(MOCK_SERPER_RESULT, brand="Acne Studios")
+        assert item.product_url == MOCK_SERPER_RESULT["link"]
+
+    def test_content_hash_set(self):
+        item = parse_result(MOCK_SERPER_RESULT, brand="Acne Studios")
+        assert item.content_hash is not None
+        assert len(item.content_hash) == 64
+
+    def test_missing_link_returns_none(self):
+        result = {**MOCK_SERPER_RESULT, "link": ""}
+        assert parse_result(result, brand="Acne Studios") is None
+
+    def test_missing_title_returns_none(self):
+        result = {**MOCK_SERPER_RESULT, "title": ""}
+        assert parse_result(result, brand="Acne Studios") is None
+
+    def test_non_usd_price_returns_none(self):
+        result = {**MOCK_SERPER_RESULT, "price": "£195.00"}
+        assert parse_result(result, brand="Acne Studios") is None
+
+    def test_missing_price_returns_none(self):
+        result = {**MOCK_SERPER_RESULT, "price": None}
+        assert parse_result(result, brand="Acne Studios") is None

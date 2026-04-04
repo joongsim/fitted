@@ -96,7 +96,39 @@ def _slugify(text: str) -> str:
 # Stubs — implemented in later tasks
 # ---------------------------------------------------------------------------
 
-def parse_result(result: dict, brand: str): ...
+def parse_result(result: dict, brand: str) -> Optional[CatalogItemCreate]:
+    """
+    Parse a single Serper Google Shopping result into a CatalogItemCreate.
+
+    Returns None if the result is missing required fields or has a non-USD price.
+    image_url is intentionally left None — set after S3 upload.
+    """
+    link = result.get("link") or ""
+    if not link:
+        return None
+
+    title = result.get("title") or ""
+    if not title:
+        return None
+
+    price = parse_price(result.get("price"))
+    if price is None:
+        return None
+
+    item_id = make_item_id(link)
+    content_hash = make_content_hash(title, price, brand, "menswear")
+
+    return CatalogItemCreate(
+        item_id=item_id,
+        domain="fashion",
+        title=title[:500],
+        price=price,
+        image_url=None,
+        product_url=link,
+        source="serper",
+        content_hash=content_hash,
+        attributes={"brand": brand[:255], "category": "menswear"},
+    )
 
 
 async def search_shopping(query: str, api_key: str) -> list: ...
