@@ -163,7 +163,7 @@ async def download_image(
     Download a product image and upload it to S3.
 
     Returns the S3 URL (s3://bucket/key) on success, or None on any failure.
-    Validates content-type (must be image/*) and size (max 5 MB).
+    Validates content-type (must be image/*) and size (max 15 MB).
     """
     async with sem:
         if not url or not url.startswith(("http://", "https://")):
