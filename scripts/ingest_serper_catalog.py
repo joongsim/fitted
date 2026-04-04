@@ -308,9 +308,12 @@ async def ingest(args: argparse.Namespace) -> None:
     logger.info("Loaded %d brands from %s", len(brands), brands_path)
 
     # Load config
-    api_key = os.environ.get("SERPER_API_KEY", "")
+    try:
+        api_key = config.serper_api_key
+    except Exception:
+        api_key = ""
     if not api_key:
-        logger.error("SERPER_API_KEY is not set")
+        logger.error("SERPER_API_KEY is not set (checked SSM /fitted/serper-api-key and env)")
         sys.exit(1)
 
     database_url = config.database_url

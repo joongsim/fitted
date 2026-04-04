@@ -131,6 +131,11 @@ class Config:
         return self.get_parameter("/fitted/rapidapi-key")
 
     @property
+    def serper_api_key(self) -> str:
+        """Get Serper API key for Google Shopping search."""
+        return self.get_parameter("/fitted/serper-api-key")
+
+    @property
     def jwt_secret_key(self) -> str:
         """Get JWT secret key."""
         return self.get_parameter(
