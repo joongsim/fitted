@@ -28,6 +28,7 @@ Security notes:
 
 import argparse
 import asyncio
+import base64
 import hashlib
 import json
 import logging
@@ -166,41 +167,51 @@ async def download_image(
     Validates content-type (must be image/*) and size (max 15 MB).
     """
     async with sem:
-        if not url or not url.startswith(("http://", "https://")):
-            logger.debug("Skipping image for %s — no URL", item_id)
+        if not url:
             return None
         try:
-            async with httpx.AsyncClient(
-                timeout=REQUEST_TIMEOUT, follow_redirects=True
-            ) as client:
-                async with client.stream("GET", url) as response:
-                    response.raise_for_status()
-                    content_type = response.headers.get("content-type", "")
-                    if not content_type.startswith("image/"):
-                        logger.warning(
-                            "Skipping %s — non-image content-type: %r",
-                            item_id,
-                            content_type,
-                        )
-                        return None
-
-                    chunks = []
-                    total = 0
-                    async for chunk in response.aiter_bytes(8192):
-                        total += len(chunk)
-                        if total > MAX_IMAGE_BYTES:
-                            logger.warning("Skipping %s — image exceeds 5 MB", item_id)
+            if url.startswith("data:image/"):
+                # Inline base64 data URI — decode directly
+                header, _, b64data = url.partition(",")
+                content_type = header.split(";")[0].split(":", 1)[1]
+                image_data = base64.b64decode(b64data)
+            elif url.startswith(("http://", "https://")):
+                async with httpx.AsyncClient(
+                    timeout=REQUEST_TIMEOUT, follow_redirects=True
+                ) as client:
+                    async with client.stream("GET", url) as response:
+                        response.raise_for_status()
+                        content_type = response.headers.get("content-type", "")
+                        if not content_type.startswith("image/"):
+                            logger.warning(
+                                "Skipping %s — non-image content-type: %r",
+                                item_id,
+                                content_type,
+                            )
                             return None
-                        chunks.append(chunk)
 
-                    image_data = b"".join(chunks)
+                        chunks = []
+                        total = 0
+                        async for chunk in response.aiter_bytes(8192):
+                            total += len(chunk)
+                            if total > MAX_IMAGE_BYTES:
+                                logger.warning(
+                                    "Skipping %s — image exceeds 15 MB", item_id
+                                )
+                                return None
+                            chunks.append(chunk)
 
-            s3_key = f"images/catalog/serper/{item_id}.jpg"
+                        image_data = b"".join(chunks)
+            else:
+                return None
+
+            ext = content_type.split("/")[-1].split("+")[0]  # e.g. webp, jpeg, png
+            s3_key = f"images/catalog/serper/{item_id}.{ext}"
             s3_client.put_object(
                 Bucket=bucket,
                 Key=s3_key,
                 Body=image_data,
-                ContentType="image/jpeg",
+                ContentType=content_type,
             )
             return f"s3://{bucket}/{s3_key}"
 
@@ -425,10 +436,12 @@ async def ingest(args: argparse.Namespace) -> None:
             for (raw, item), s3_url in zip(parsed_items, image_urls):
                 if s3_url:
                     item = item.model_copy(update={"image_url": s3_url})
-                elif not raw.get("imageUrl"):
-                    total_missing_images += 1
                 else:
-                    total_failed_images += 1
+                    raw_url = raw.get("imageUrl") or ""
+                    if not raw_url or not raw_url.startswith(("http://", "https://")):
+                        total_missing_images += 1
+                    else:
+                        total_failed_images += 1
                 upsert_batch.append(item)
 
             inserted, updated = bulk_upsert(conn, upsert_batch, dry_run=False)
